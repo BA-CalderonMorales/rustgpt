@@ -1,5 +1,8 @@
 # rustgpt
 
+A from-scratch language-model implementation in pure Rust that uses `ndarray`
+for tensor operations and no external machine-learning framework.
+
 ## Learning Project
 
 This fork is my space to explore, learn, poke, observe, and shape a small
