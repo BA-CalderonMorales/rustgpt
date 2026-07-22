@@ -1,0 +1,55 @@
+name: Dispatch E2E evaluation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/main.rs"
+      - "src/vocab.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "data/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustgpt-e2e-dispatch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    name: Request black-box evaluation
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Require evaluator dispatch token
+        env:
+          DISPATCH_TOKEN: ${{ secrets.RUSTGPT_EVALS_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "RUSTGPT_EVALS_DISPATCH_TOKEN is not configured" >&2
+            exit 1
+          fi
+
+      - name: Dispatch exact source revision
+        uses: actions/github-script@v8
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref_name }}
+          SOURCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          github-token: ${{ secrets.RUSTGPT_EVALS_DISPATCH_TOKEN }}
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: "BA-CalderonMorales",
+              repo: "rustgpt-evals",
+              event_type: "rustgpt-main-updated",
+              client_payload: {
+                repository: process.env.SOURCE_REPOSITORY,
+                sha: process.env.SOURCE_SHA,
+                ref: process.env.SOURCE_REF,
+                source_run_url: process.env.SOURCE_RUN_URL,
+              },
+            });

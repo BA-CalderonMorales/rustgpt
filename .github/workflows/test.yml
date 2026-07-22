@@ -16,8 +16,8 @@ env:
 name: Test
 jobs:
   required:
-    runs-on: ubuntu-latest
-    name: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    name: Rust tests
     steps:
       - uses: actions/checkout@v4
         with:
