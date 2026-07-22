@@ -2,18 +2,7 @@ use ndarray::{Array2, Axis};
 
 use crate::{adam::Adam, llm::Layer};
 
-pub struct LayerNorm {
-    epsilon: f32,       // Small constant for stability
-    gamma: Array2<f32>, // Learnable scaling parameter
-    beta: Array2<f32>,  // Learnable bias parameter
-
-    cached_input: Option<Array2<f32>>,
-    cached_mean: Option<Array2<f32>>,
-    cached_std: Option<Array2<f32>>,
-
-    optimizer_gamma: Adam,
-    optimizer_beta: Adam,
-}
+use super::LayerNorm;
 
 impl LayerNorm {
     /// Initialize LayerNorm with learnable parameters

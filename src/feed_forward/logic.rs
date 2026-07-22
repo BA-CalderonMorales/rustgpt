@@ -3,19 +3,7 @@ use rand_distr::{Distribution, Normal};
 
 use crate::{adam::Adam, llm::Layer};
 
-/// Chooses the update rule used by each feed-forward parameter tensor.
-#[derive(Clone, Copy, Debug)]
-pub enum OptimizerKind {
-    Adam,
-    Sgd,
-    RmsProp,
-}
-
-enum Optimizer {
-    Adam(Adam),
-    Sgd(Sgd),
-    RmsProp(RmsProp),
-}
+use super::{FeedForward, OptimizerKind, RmsProp, Sgd, interfaces::Optimizer};
 
 impl Optimizer {
     fn new(kind: OptimizerKind, shape: (usize, usize)) -> Self {
@@ -35,18 +23,10 @@ impl Optimizer {
     }
 }
 
-pub struct Sgd;
-
 impl Sgd {
     pub fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>, lr: f32) {
         *params -= &(grads * lr);
     }
-}
-
-pub struct RmsProp {
-    alpha: f32,
-    epsilon: f32,
-    pub squared_gradients: Array2<f32>,
 }
 
 impl RmsProp {
@@ -65,23 +45,6 @@ impl RmsProp {
         let update = grads / denom;
         *params -= &(update * lr);
     }
-}
-
-pub struct FeedForward {
-    w1: Array2<f32>,
-    b1: Array2<f32>,
-    w2: Array2<f32>,
-    b2: Array2<f32>,
-
-    // Cached values for backward pass
-    input: Option<Array2<f32>>,
-    hidden_pre_activation: Option<Array2<f32>>,
-    hidden_post_activation: Option<Array2<f32>>,
-
-    optimizer_w1: Optimizer,
-    optimizer_b1: Optimizer,
-    optimizer_w2: Optimizer,
-    optimizer_b2: Optimizer,
 }
 
 impl FeedForward {

@@ -3,13 +3,7 @@ use rand_distr::{Distribution, Normal};
 
 use crate::{EMBEDDING_DIM, MAX_SEQ_LEN, adam::Adam, llm::Layer, vocab::Vocab};
 
-pub struct Embeddings {
-    pub token_embeddings: Array2<f32>,
-    pub positional_embeddings: Array2<f32>,
-    pub cached_input: Option<Array2<f32>>,
-    pub token_optimizer: Adam,
-    pub positional_optimizer: Adam,
-}
+use super::Embeddings;
 
 impl Default for Embeddings {
     fn default() -> Self {

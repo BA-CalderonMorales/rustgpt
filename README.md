@@ -49,9 +49,11 @@ cargo run -- --e2e "hello world"
 - [Learning directions](docs/learning-directions.md) collects possible
   experiments without turning them into product promises.
 
-Start with [`src/main.rs`](src/main.rs) for orchestration and
-[`src/llm.rs`](src/llm.rs) for forward passes, backward passes, training, and
-generation.
+Start with [`src/main.rs`](src/main.rs) for high-level orchestration, then enter
+the [`application`](src/application/mod.rs) facade for executable behavior and
+the [`llm`](src/llm/mod.rs) facade for the model API. Forward passes, backward
+passes, training, and generation live in
+[`src/llm/logic.rs`](src/llm/logic.rs).
 
 ## Contributing
 

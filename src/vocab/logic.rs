@@ -1,13 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use bincode::Encode;
-
-#[derive(Clone, Encode)]
-pub struct Vocab {
-    pub encode: HashMap<String, usize>,
-    pub decode: HashMap<usize, String>,
-    pub words: Vec<String>,
-}
+use super::Vocab;
 
 impl Default for Vocab {
     fn default() -> Self {

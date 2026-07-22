@@ -3,12 +3,7 @@ use rand_distr::{Distribution, Normal};
 
 use crate::{adam::Adam, llm::Layer};
 
-pub struct OutputProjection {
-    pub w_out: Array2<f32>, // Weight matrix
-    pub b_out: Array2<f32>, // Bias vector
-    pub optimizer: Adam,
-    pub cached_input: Option<Array2<f32>>,
-}
+use super::OutputProjection;
 
 impl OutputProjection {
     /// Initialize output layer with random weights and zero bias

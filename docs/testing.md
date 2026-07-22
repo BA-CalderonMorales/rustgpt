@@ -8,6 +8,19 @@ Focused Rust tests exercise vocabulary behavior, embeddings, attention,
 feed-forward operations, transformer composition, output projection, dataset
 loading, and optimizer behavior.
 
+## Test Source Map
+
+| Boundary | Location | Purpose |
+|---|---|---|
+| Private implementation | `src/self_attention/tests.rs` | Finite-difference attention gradient invariant with private weights. |
+| Public component | `tests/*_test.rs` | Domain behavior through public facades. |
+| Public API | `tests/public_api_test.rs` | Existing module paths, re-exports, constants, and public fields compile. |
+| Public CLI | `tests/cli_contract_test.rs` | Arguments, streams, exit codes, and one-line E2E JSON. |
+| Cross-domain model | `tests/llm_test.rs` | Tokenization, construction, prediction, training, and parameter totals. |
+
+Private implementation-sensitive tests live with their domain. Cross-domain,
+CLI, and public-consumer tests stay under top-level `tests/`.
+
 ## Mutation-Resistant Tests
 
 The optimizer tests assert invariants that should fail when meaningful logic is

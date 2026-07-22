@@ -1,13 +1,6 @@
 use ndarray::Array2;
 
-pub struct Adam {
-    beta1: f32,
-    beta2: f32,
-    epsilon: f32,
-    timestep: usize,
-    pub m: Array2<f32>,
-    pub v: Array2<f32>,
-}
+use super::Adam;
 
 impl Adam {
     pub fn new(shape: (usize, usize)) -> Self {

@@ -12,7 +12,9 @@ architecture.
 - Model body: embeddings, three transformer blocks, and an output projection
 - Decoding: greedy token selection
 
-The shared dimensions and sequence limit are defined in `src/lib.rs`.
+The shared dimensions and sequence limit are defined in
+`src/configuration/constants.rs` and compatibility-re-exported from the crate
+root.
 
 ## Training Phases
 

@@ -18,30 +18,40 @@ an `LLM`.
 
 ```text
 src/
-|-- main.rs               CLI, dataset setup, training, and interactive mode
-|-- lib.rs                Module exports and model constants
-|-- llm.rs                Model composition, training, and generation
-|-- transformer.rs        Transformer block composition
-|-- self_attention.rs     Self-attention operation
-|-- feed_forward.rs       Position-wise feed-forward operation
-|-- embeddings.rs         Token and positional embeddings
-|-- output_projection.rs  Vocabulary projection
-|-- layer_norm.rs         Layer normalization
-|-- vocab.rs              Vocabulary and tokenization
-|-- dataset_loader.rs     JSON and CSV dataset loading
-`-- adam.rs               Optimizer implementations
+|-- main.rs               Parse, load, build, and run
+|-- lib.rs                Domain declarations and compatibility re-exports
+|-- cli/                   CLI mode and argument behavior
+|-- application/           Dataset, model, training, and interaction orchestration
+|-- configuration/         Shared model constants
+|-- llm/                   Model API, composition, training, and generation
+|-- transformer/           Transformer block composition
+|-- self_attention/        Self-attention operation and private gradient test
+|-- feed_forward/          Position-wise feed-forward operation and optimizers
+|-- embeddings/            Token and positional embeddings
+|-- output_projection/     Vocabulary projection
+|-- layer_norm/            Layer normalization
+|-- vocab/                 Vocabulary and tokenization
+|-- dataset_loader/        JSON and CSV dataset loading
+`-- adam/                  Adam optimizer
 ```
 
-Tests mirror the major components under `tests/`. See [Testing](testing.md) for
-the purpose of each test layer.
+Each domain's `mod.rs` is its facade. `interfaces.rs` holds types and traits,
+`logic.rs` holds implementations, and specialized files such as `constants.rs`
+or `tests.rs` exist only when that responsibility is present. Category modules
+stay private; callers use the facade. See
+[`ADR 0001`](architecture/decisions/0001-domain-module-layout.md) for the
+structural decision and [Testing](testing.md) for test boundaries.
 
 ## Reading Order
 
-1. `src/main.rs` shows how data, model layers, training phases, and CLI modes
-   connect.
-2. `src/llm.rs` shows how layers participate in prediction and training.
-3. `src/transformer.rs` narrows the view to attention and feed-forward work.
-4. Read the individual layer modules alongside their matching tests.
+1. `src/main.rs` shows the four executable steps.
+2. `src/application/logic.rs` connects data, model construction, training, and
+   interaction.
+3. `src/llm/logic.rs` shows how layers participate in prediction and training.
+4. `src/transformer/logic.rs` narrows the view to attention and feed-forward
+   work.
+5. Enter each domain through its `mod.rs` facade, then read its interface and
+   logic alongside the matching tests.
 
 ## Scope
 
