@@ -19,9 +19,9 @@ fn test_dataset_new_json() {
     );
     assert_eq!(
         dataset.pretraining_data[0],
-        "The sun rises in the east and sets in the west </s>"
+        "Water moves through a repeating cycle around the world. </s>"
     );
-    assert!(dataset.chat_training_data[0].starts_with("User: What causes rain?"));
+    assert!(dataset.chat_training_data[0].starts_with("User: What is evaporation?"));
 }
 
 #[test]

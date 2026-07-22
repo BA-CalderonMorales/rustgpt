@@ -101,5 +101,5 @@ fn e2e_emits_one_json_line_with_the_public_schema() {
             .as_str()
             .is_some_and(|output| !output.is_empty())
     );
-    assert_eq!(response["total_parameters"].as_u64(), Some(493_973));
+    assert_eq!(response["total_parameters"].as_u64(), Some(380_893));
 }

@@ -44,6 +44,8 @@ cargo run -- --e2e "hello world"
   local commands.
 - [Model and training](docs/model-and-training.md) records the current model
   configuration and training phases.
+- [Dataset curation](docs/dataset-curation.md) defines the compact water-cycle
+  teaching set, budgets, held-out prompts, and E2E inference boundary.
 - [Testing](docs/testing.md) explains the unit, mutation-resistant, integration,
   and black-box evaluation boundaries.
 - [Learning directions](docs/learning-directions.md) collects possible
