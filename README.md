@@ -9,9 +9,7 @@ A complete **Large Language Model implementation in pure Rust** with no external
 
 ## Learning Project
 
-This is a learning fork of [tekaratzas/RustGPT](https://github.com/tekaratzas/RustGPT), created by [tekaratzas](https://github.com/tekaratzas). The upstream project remains the source of the original implementation; this fork is where I study the design through small, documented experiments.
-
-RustGPT's goal is to make the moving parts of a transformer legible in Rust, not to compete with production LLM systems. The code deliberately favors a small, inspectable implementation over scale, model quality, or feature breadth.
+This fork is my space to explore, learn, poke, observe, and shape an LLM implementation in ways that make its design easier to understand. The code deliberately favors a small, inspectable implementation over scale, model quality, or feature breadth.
 
 The repository uses layered checks to protect that learning surface:
 
@@ -184,6 +182,10 @@ Perfect for understanding how modern LLMs work under the hood!
 - `rand` + `rand_distr` - Random number generation for initialization
 
 No PyTorch, TensorFlow, or Candle - just pure Rust and linear algebra!
+
+## Attribution
+
+This repository is a learning fork of [tekaratzas/RustGPT](https://github.com/tekaratzas/RustGPT), created by [tekaratzas](https://github.com/tekaratzas). The upstream project is the source of the original implementation; changes here are focused on my learning journey.
 
 ## 🤝 Contributing
 
