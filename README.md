@@ -7,6 +7,28 @@ https://github.com/user-attachments/assets/ec4a4100-b03a-4b3c-a7d6-806ea54ed4ed
 
 A complete **Large Language Model implementation in pure Rust** with no external ML frameworks. Built from the ground up using only `ndarray` for matrix operations.
 
+## Learning Project
+
+This is a learning fork of [tekaratzas/RustGPT](https://github.com/tekaratzas/RustGPT), created by [tekaratzas](https://github.com/tekaratzas). The upstream project remains the source of the original implementation; this fork is where I study the design through small, documented experiments.
+
+RustGPT's goal is to make the moving parts of a transformer legible in Rust, not to compete with production LLM systems. The code deliberately favors a small, inspectable implementation over scale, model quality, or feature breadth.
+
+The repository uses layered checks to protect that learning surface:
+
+- **Unit tests** validate individual layers and optimizer behavior.
+- **Mutation-resistant cases** check meaningful optimizer invariants: update direction, moment/history updates, determinism, and supplied learning rates.
+- **Integration tests** exercise tokenization, real layer composition, and a small training pass.
+- **E2E tests** live in the separate `rustgpt-evals` companion project. It invokes this binary through its public process boundary, like browser automation for LLM behavior.
+
+The E2E boundary is intentionally tiny and machine-readable:
+
+```bash
+cargo run -- --e2e "hello world"
+# {"output":"...","prompt":"hello world","status":"ok","total_parameters":...}
+```
+
+`--e2e` initializes the model and runs generation without training or interactive input. It is intended for smoke and contract checks, not claims about model quality.
+
 ## 🚀 What This Is
 
 This project demonstrates how to build a transformer-based language model from scratch in Rust, including:

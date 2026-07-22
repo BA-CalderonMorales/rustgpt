@@ -8,7 +8,51 @@ use llm::{
     transformer::TransformerBlock,
 };
 
+enum Mode {
+    Interactive,
+    E2e { prompt: String },
+}
+
+fn usage() {
+    println!("Usage: llm [--e2e <prompt>]");
+    println!();
+    println!("Examples:");
+    println!("  llm");
+    println!("  llm --e2e \"hello world\"");
+}
+
+fn parse_mode() -> Result<Mode, String> {
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
+        None => Ok(Mode::Interactive),
+        Some("--e2e") => {
+            let prompt = args
+                .next()
+                .ok_or_else(|| "--e2e requires a prompt".to_string())?;
+            if args.next().is_some() {
+                return Err("--e2e accepts exactly one prompt".to_string());
+            }
+            Ok(Mode::E2e { prompt })
+        }
+        Some("--help") | Some("-h") => {
+            usage();
+            std::process::exit(0);
+        }
+        Some("--version") => {
+            println!("llm {}", env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+        Some(argument) => Err(format!("unknown argument: {argument}")),
+    }
+}
+
 fn main() {
+    let mode = parse_mode().unwrap_or_else(|error| {
+        eprintln!("error: {error}");
+        eprintln!("Try 'llm --help' for usage.");
+        std::process::exit(2);
+    });
+
     // Mock input - test conversational format
     let string = String::from("User: How do mountains form?");
 
@@ -48,6 +92,20 @@ fn main() {
             Box::new(output_projection),
         ],
     );
+
+    if let Mode::E2e { prompt } = mode {
+        let output = llm.predict(&prompt);
+        println!(
+            "{}",
+            serde_json::json!({
+                "status": "ok",
+                "prompt": prompt,
+                "output": output,
+                "total_parameters": llm.total_parameters(),
+            })
+        );
+        return;
+    }
 
     println!("\n=== MODEL INFORMATION ===");
     println!("Network architecture: {}", llm.network_description());

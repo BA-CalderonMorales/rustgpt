@@ -21,7 +21,6 @@ impl Vocab {
         let mut decode = HashMap::new();
 
         for (i, &word) in words.iter().enumerate() {
-            println!("Adding word: {word} to encoding: {i}");
             encode.insert(word.to_string(), i);
             decode.insert(i, word.to_string());
         }
