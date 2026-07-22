@@ -189,7 +189,10 @@ This repository is a learning fork of [tekaratzas/RustGPT](https://github.com/te
 
 ## 🤝 Contributing
 
-Contributions are welcome! This project is perfect for learning and experimentation.
+Contributions are welcome! This project is intended to support learning and
+experimentation for others as well as for me. Read [CONTRIBUTING.md](CONTRIBUTING.md)
+for the learning-first scope, test expectations, and pull request workflow. All
+participants must follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ### High Priority Features Needed
 - **🏪 Model Persistence** - Save/load trained parameters to disk (currently all in-memory)
