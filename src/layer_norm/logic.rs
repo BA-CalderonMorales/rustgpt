@@ -1,8 +1,7 @@
 use ndarray::{Array2, Axis};
 
-use crate::{adam::Adam, llm::Layer};
-
 use super::LayerNorm;
+use crate::{adam::Adam, llm::Layer};
 
 impl LayerNorm {
     /// Initialize LayerNorm with learnable parameters

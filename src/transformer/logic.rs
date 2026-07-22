@@ -1,10 +1,9 @@
 use ndarray::Array2;
 
+use super::TransformerBlock;
 use crate::{
     feed_forward::FeedForward, layer_norm::LayerNorm, llm::Layer, self_attention::SelfAttention,
 };
-
-use super::TransformerBlock;
 
 impl TransformerBlock {
     pub fn new(embedding_dim: usize, hidden_dim: usize) -> Self {

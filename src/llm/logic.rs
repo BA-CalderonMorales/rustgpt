@@ -2,12 +2,11 @@ use std::cmp::Ordering;
 
 use ndarray::{Array1, Array2, Axis};
 
+use super::{LLM, Layer};
 use crate::{
     EMBEDDING_DIM, Embeddings, HIDDEN_DIM, MAX_SEQ_LEN, Vocab, output_projection::OutputProjection,
     transformer::TransformerBlock,
 };
-
-use super::{LLM, Layer};
 
 impl Default for LLM {
     fn default() -> Self {

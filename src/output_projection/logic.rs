@@ -1,9 +1,8 @@
 use ndarray::{Array2, Axis};
 use rand_distr::{Distribution, Normal};
 
-use crate::{adam::Adam, llm::Layer};
-
 use super::OutputProjection;
+use crate::{adam::Adam, llm::Layer};
 
 impl OutputProjection {
     /// Initialize output layer with random weights and zero bias

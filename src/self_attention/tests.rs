@@ -1,8 +1,7 @@
 use ndarray::{Array2, array};
 
-use crate::llm::Layer;
-
 use super::SelfAttention;
+use crate::llm::Layer;
 
 fn scalar_loss(
     attention: &mut SelfAttention,

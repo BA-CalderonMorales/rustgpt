@@ -1,9 +1,8 @@
 use ndarray::{Array2, s};
 use rand_distr::{Distribution, Normal};
 
-use crate::{EMBEDDING_DIM, MAX_SEQ_LEN, adam::Adam, llm::Layer, vocab::Vocab};
-
 use super::Embeddings;
+use crate::{EMBEDDING_DIM, MAX_SEQ_LEN, adam::Adam, llm::Layer, vocab::Vocab};
 
 impl Default for Embeddings {
     fn default() -> Self {

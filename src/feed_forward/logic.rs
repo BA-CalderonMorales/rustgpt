@@ -1,9 +1,8 @@
 use ndarray::{Array2, Axis};
 use rand_distr::{Distribution, Normal};
 
-use crate::{adam::Adam, llm::Layer};
-
 use super::{FeedForward, OptimizerKind, RmsProp, Sgd, interfaces::Optimizer};
+use crate::{adam::Adam, llm::Layer};
 
 impl Optimizer {
     fn new(kind: OptimizerKind, shape: (usize, usize)) -> Self {

@@ -3,9 +3,8 @@ use std::f32;
 use ndarray::Array2;
 use rand_distr::{Distribution, Normal};
 
-use crate::{EMBEDDING_DIM, adam::Adam, llm::Layer};
-
 use super::SelfAttention;
+use crate::{EMBEDDING_DIM, adam::Adam, llm::Layer};
 
 impl Default for SelfAttention {
     fn default() -> Self {
