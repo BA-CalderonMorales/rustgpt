@@ -16,7 +16,7 @@ env:
 name: Check
 jobs:
   fmt:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
     name: fmt
@@ -36,7 +36,7 @@ jobs:
       - run: cargo fmt --check
 
   clippy:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     name: clippy
     permissions:
       contents: read
@@ -57,7 +57,7 @@ jobs:
       - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   typos:
-      runs-on: blacksmith-2vcpu-ubuntu-2404
+      runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
       name: typos
       permissions:
         contents: read

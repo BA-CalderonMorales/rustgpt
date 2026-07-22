@@ -21,7 +21,7 @@ concurrency:
 jobs:
   dispatch:
     name: Request black-box evaluation
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Require evaluator dispatch token
         env:
