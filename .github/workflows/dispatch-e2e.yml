@@ -32,7 +32,7 @@ jobs:
           fi
 
       - name: Dispatch exact source revision
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           SOURCE_REPOSITORY: ${{ github.repository }}
           SOURCE_SHA: ${{ github.sha }}
@@ -41,6 +41,16 @@ jobs:
         with:
           github-token: ${{ secrets.RUSTGPT_EVALS_DISPATCH_TOKEN }}
           script: |
+            const sourceCommit = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: process.env.SOURCE_SHA,
+            });
+            const firstLine = sourceCommit.data.commit.message.split(/\r?\n/, 1)[0].trim();
+            const subjectCharacters = Array.from(firstLine);
+            const commitSubject = subjectCharacters.length > 100
+              ? `${subjectCharacters.slice(0, 99).join("")}…`
+              : firstLine;
             await github.rest.repos.createDispatchEvent({
               owner: "BA-CalderonMorales",
               repo: "rustgpt-evals",
@@ -48,6 +58,9 @@ jobs:
               client_payload: {
                 repository: process.env.SOURCE_REPOSITORY,
                 sha: process.env.SOURCE_SHA,
+                short_sha: process.env.SOURCE_SHA.slice(0, 7),
+                commit_subject: commitSubject,
+                commit_url: sourceCommit.data.html_url,
                 ref: process.env.SOURCE_REF,
                 source_run_url: process.env.SOURCE_RUN_URL,
               },
