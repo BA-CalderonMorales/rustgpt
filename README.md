@@ -59,6 +59,11 @@ Focused contributions that improve understanding are welcome. Read the
 [contribution guide](CONTRIBUTING.md) and follow the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## License
+
+This fork remains available under the original [MIT License](LICENSE.txt). The
+copyright and license notice from Thomas Karatzas are preserved unchanged.
+
 ## Attribution
 
 This repository is a learning fork of
