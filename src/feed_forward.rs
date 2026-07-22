@@ -3,6 +3,70 @@ use rand_distr::{Distribution, Normal};
 
 use crate::{adam::Adam, llm::Layer};
 
+/// Chooses the update rule used by each feed-forward parameter tensor.
+#[derive(Clone, Copy, Debug)]
+pub enum OptimizerKind {
+    Adam,
+    Sgd,
+    RmsProp,
+}
+
+enum Optimizer {
+    Adam(Adam),
+    Sgd(Sgd),
+    RmsProp(RmsProp),
+}
+
+impl Optimizer {
+    fn new(kind: OptimizerKind, shape: (usize, usize)) -> Self {
+        match kind {
+            OptimizerKind::Adam => Self::Adam(Adam::new(shape)),
+            OptimizerKind::Sgd => Self::Sgd(Sgd),
+            OptimizerKind::RmsProp => Self::RmsProp(RmsProp::new(shape)),
+        }
+    }
+
+    pub fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>, lr: f32) {
+        match self {
+            Self::Adam(adam) => adam.step(params, grads, lr),
+            Self::Sgd(sgd) => sgd.step(params, grads, lr),
+            Self::RmsProp(rms_prop) => rms_prop.step(params, grads, lr),
+        }
+    }
+}
+
+pub struct Sgd;
+
+impl Sgd {
+    pub fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>, lr: f32) {
+        *params -= &(grads * lr);
+    }
+}
+
+pub struct RmsProp {
+    alpha: f32,
+    epsilon: f32,
+    pub squared_gradients: Array2<f32>,
+}
+
+impl RmsProp {
+    pub fn new(shape: (usize, usize)) -> Self {
+        Self {
+            alpha: 0.9,
+            epsilon: 1e-8,
+            squared_gradients: Array2::zeros(shape),
+        }
+    }
+
+    pub fn step(&mut self, params: &mut Array2<f32>, grads: &Array2<f32>, lr: f32) {
+        self.squared_gradients = &self.squared_gradients * self.alpha
+            + &(grads.mapv(|gradient| gradient * gradient) * (1.0 - self.alpha));
+        let denom = self.squared_gradients.mapv(f32::sqrt) + self.epsilon;
+        let update = grads / denom;
+        *params -= &(update * lr);
+    }
+}
+
 pub struct FeedForward {
     w1: Array2<f32>,
     b1: Array2<f32>,
@@ -14,15 +78,23 @@ pub struct FeedForward {
     hidden_pre_activation: Option<Array2<f32>>,
     hidden_post_activation: Option<Array2<f32>>,
 
-    optimizer_w1: Adam,
-    optimizer_b1: Adam,
-    optimizer_w2: Adam,
-    optimizer_b2: Adam,
+    optimizer_w1: Optimizer,
+    optimizer_b1: Optimizer,
+    optimizer_w2: Optimizer,
+    optimizer_b2: Optimizer,
 }
 
 impl FeedForward {
-    /// Initialize a feedforward layer with random weights
     pub fn new(embedding_dim: usize, hidden_dim: usize) -> Self {
+        Self::new_with_optimizer(embedding_dim, hidden_dim, OptimizerKind::Adam)
+    }
+
+    /// Creates a layer whose parameter tensors each own optimizer state.
+    pub fn new_with_optimizer(
+        embedding_dim: usize,
+        hidden_dim: usize,
+        optimizer_kind: OptimizerKind,
+    ) -> Self {
         let mut rng = rand::rng();
 
         // Xavier/He initialization for w1: std = sqrt(2 / fan_in)
@@ -41,10 +113,10 @@ impl FeedForward {
             input: None,
             hidden_pre_activation: None,
             hidden_post_activation: None,
-            optimizer_w1: Adam::new((embedding_dim, hidden_dim)),
-            optimizer_b1: Adam::new((1, hidden_dim)),
-            optimizer_w2: Adam::new((hidden_dim, embedding_dim)),
-            optimizer_b2: Adam::new((1, embedding_dim)),
+            optimizer_w1: Optimizer::new(optimizer_kind, (embedding_dim, hidden_dim)),
+            optimizer_b1: Optimizer::new(optimizer_kind, (1, hidden_dim)),
+            optimizer_w2: Optimizer::new(optimizer_kind, (hidden_dim, embedding_dim)),
+            optimizer_b2: Optimizer::new(optimizer_kind, (1, embedding_dim)),
         }
     }
 }

@@ -1,23 +1,12 @@
 use std::io::Write;
 
-use ::llm::{EMBEDDING_DIM, HIDDEN_DIM, MAX_SEQ_LEN};
-use dataset_loader::{Dataset, DatasetType};
-
-use crate::{
-    embeddings::Embeddings, llm::LLM, output_projection::OutputProjection,
-    transformer::TransformerBlock, vocab::Vocab,
+use llm::{
+    EMBEDDING_DIM, HIDDEN_DIM, LLM, MAX_SEQ_LEN, Vocab,
+    dataset_loader::{Dataset, DatasetType},
+    embeddings::Embeddings,
+    output_projection::OutputProjection,
+    transformer::TransformerBlock,
 };
-
-mod adam;
-mod dataset_loader;
-mod embeddings;
-mod feed_forward;
-mod layer_norm;
-mod llm;
-mod output_projection;
-mod self_attention;
-mod transformer;
-mod vocab;
 
 fn main() {
     // Mock input - test conversational format
