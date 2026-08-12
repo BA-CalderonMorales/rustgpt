@@ -2,7 +2,7 @@
 
 # RustGPT
 
-**A from-scratch transformer language model in pure Rust — inspectable mechanics, no external ML framework**
+**A from-scratch transformer language model in pure Rust — inspectable mechanics, no external ML framework (fork - see [Attribution](https://github.com/BA-CalderonMorales/rustgpt#attribution))**
 
 [![Crate](https://img.shields.io/badge/version-0.0.4-blue.svg?logo=rust&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
