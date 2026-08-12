@@ -1,8 +1,6 @@
 use std::f32;
 
-use bincode::config::standard;
-use bincode::error::{DecodeError, EncodeError};
-use bincode::serde::{decode_from_slice, encode_to_vec};
+use bincode::{config::standard, error::{DecodeError, EncodeError}, serde::{decode_from_slice, encode_to_vec}};
 use ndarray::Array2;
 use rand_distr::{Distribution, Normal};
 

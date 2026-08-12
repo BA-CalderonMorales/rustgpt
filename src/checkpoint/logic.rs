@@ -1,5 +1,4 @@
-use bincode::config::standard;
-use bincode::serde::{decode_from_slice, encode_to_vec};
+use bincode::{config::standard, serde::{decode_from_slice, encode_to_vec}};
 use serde::{Deserialize, Serialize};
 
 use crate::{
