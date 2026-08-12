@@ -132,25 +132,33 @@ impl LLM {
     }
 
     pub fn train(&mut self, data: Vec<&str>, epochs: usize, lr: f32) {
-        self.train_impl(data, epochs, lr, false);
+        let _ = self.train_with_progress(data, epochs, lr, false);
     }
 
+    /// Train for `epochs`, returning the average loss of every epoch.
     pub fn train_with_progress(
         &mut self,
         data: Vec<&str>,
         epochs: usize,
         lr: f32,
         progress_to_stderr: bool,
-    ) {
-        self.train_impl(data, epochs, lr, progress_to_stderr);
+    ) -> Vec<f32> {
+        self.train_impl(data, epochs, lr, progress_to_stderr)
     }
 
-    fn train_impl(&mut self, data: Vec<&str>, epochs: usize, lr: f32, progress_to_stderr: bool) {
+    fn train_impl(
+        &mut self,
+        data: Vec<&str>,
+        epochs: usize,
+        lr: f32,
+        progress_to_stderr: bool,
+    ) -> Vec<f32> {
         let tokenized_data = data
             .iter()
             .map(|input| self.tokenize(input))
             .collect::<Vec<Vec<usize>>>();
 
+        let mut epoch_losses = Vec::with_capacity(epochs);
         for epoch in 0..epochs {
             let mut total_loss = 0.0;
             for training_row in &tokenized_data {
@@ -195,17 +203,43 @@ impl LLM {
                 }
             }
 
-            let message = format!(
-                "Epoch {}: Loss = {:.4}",
-                epoch,
-                total_loss / tokenized_data.len() as f32
-            );
+            let epoch_loss = total_loss / tokenized_data.len() as f32;
+            epoch_losses.push(epoch_loss);
+            let message = format!("Epoch {}: Loss = {:.4}", epoch, epoch_loss);
             if progress_to_stderr {
                 eprintln!("{message}");
             } else {
                 println!("{message}");
             }
         }
+        epoch_losses
+    }
+
+    /// Teacher-forced cross-entropy of one full sequence, without training.
+    ///
+    /// The whole `text` is scored: every token is predicted from its prefix,
+    /// exactly the signal training optimizes. This is the trajectory probe
+    /// for held-out data.
+    pub fn sequence_loss(&mut self, text: &str) -> f32 {
+        let tokens = self.tokenize(text);
+        if tokens.len() < 2 {
+            return 0.0;
+        }
+
+        let mut input: Array2<f32> = Array2::zeros((1, tokens.len() - 1));
+        input.row_mut(0).assign(
+            &tokens[..tokens.len() - 1]
+                .iter()
+                .map(|&x| x as f32)
+                .collect::<Array1<f32>>(),
+        );
+
+        for layer in &mut self.network {
+            input = layer.forward(&input);
+        }
+
+        let probs = Self::softmax(&input);
+        Self::cross_entropy_loss_step(&probs, &tokens[1..])
     }
 
     /// Score a generated answer against a reference: greedy generation of

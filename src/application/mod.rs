@@ -1,3 +1,3 @@
 mod logic;
 
-pub(crate) use logic::{build_model, load_datasets, run};
+pub(crate) use logic::{build_llm, load_datasets, run};

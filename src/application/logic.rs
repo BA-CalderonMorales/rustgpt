@@ -14,6 +14,7 @@ const PRETRAINING_EPOCHS: usize = 100;
 const PRETRAINING_LR: f32 = 0.0005;
 const TUNING_EPOCHS: usize = 100;
 const TUNING_LR: f32 = 0.0001;
+const TUNING_CE_SAMPLES: usize = 3;
 
 pub(crate) fn load_datasets() -> Dataset {
     Dataset::new(
@@ -29,6 +30,19 @@ pub(crate) fn load_heldout() -> Vec<(String, String)> {
     let entries: Vec<(String, String)> =
         serde_json::from_str(&text).expect("data/heldout.json must list prompt/reference pairs");
     entries
+}
+
+pub(crate) fn build_llm(dataset: &Dataset, model_path: Option<&str>) -> LLM {
+    if let Some(path) = model_path
+        && std::path::Path::new(path).exists()
+    {
+        eprintln!("Loading checkpoint {path}");
+        return llm::load(path).unwrap_or_else(|error| {
+            eprintln!("error: failed to load checkpoint {path}: {error}");
+            std::process::exit(1);
+        });
+    }
+    build_model(dataset)
 }
 
 pub(crate) fn build_model(dataset: &Dataset) -> LLM {
@@ -61,8 +75,10 @@ pub(crate) fn build_model(dataset: &Dataset) -> LLM {
 pub(crate) fn run(invocation: Invocation, dataset: &Dataset, llm: &mut LLM) {
     match invocation.mode {
         Mode::E2e { prompt } => run_e2e(prompt, llm),
-        Mode::Eval => run_training_and_eval(dataset, llm),
-        Mode::Interactive => run_training_and_interactive(dataset, llm),
+        Mode::Eval => run_training_and_eval(dataset, llm, invocation.model.as_deref()),
+        Mode::Interactive => {
+            run_training_and_interactive(dataset, llm, invocation.model.as_deref())
+        }
     }
 }
 
@@ -79,41 +95,55 @@ fn run_e2e(prompt: String, llm: &mut LLM) {
     );
 }
 
-fn train_both(dataset: &Dataset, llm: &mut LLM, progress_to_stderr: bool) {
-    let pretraining_examples: Vec<&str> = dataset
+fn train_pretraining(dataset: &Dataset, llm: &mut LLM, progress: bool) -> Vec<f32> {
+    let examples: Vec<&str> = dataset
         .pretraining_data
         .iter()
         .map(String::as_str)
         .collect();
-    let chat_training_examples: Vec<&str> = dataset
+    llm.train_with_progress(examples, PRETRAINING_EPOCHS, PRETRAINING_LR, progress)
+}
+
+fn train_tuning_part(dataset: &Dataset, llm: &mut LLM, epochs: usize, progress: bool) -> Vec<f32> {
+    let examples: Vec<&str> = dataset
         .chat_training_data
         .iter()
         .map(String::as_str)
         .collect();
-
-    llm.train_with_progress(
-        pretraining_examples,
-        PRETRAINING_EPOCHS,
-        PRETRAINING_LR,
-        progress_to_stderr,
-    );
-    llm.train_with_progress(
-        chat_training_examples,
-        TUNING_EPOCHS,
-        TUNING_LR,
-        progress_to_stderr,
-    );
+    llm.train_with_progress(examples, epochs, TUNING_LR, progress)
 }
 
-fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM) {
-    eprintln!("=== PRE-TRAINING ===");
-    train_both(dataset, llm, true);
+fn mean_heldout_ce(llm: &mut LLM, sequences: &[String]) -> f32 {
+    let total: f32 = sequences.iter().map(|text| llm.sequence_loss(text)).sum();
+    total / sequences.len().max(1) as f32
+}
 
+fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM, model_path: Option<&str>) {
     let heldout = load_heldout();
+    let chat_sequences: Vec<String> = heldout
+        .iter()
+        .map(|(prompt, reference)| format!("User: {prompt} Assistant: {reference}"))
+        .collect();
+
+    let mut trajectory_ce = vec![mean_heldout_ce(llm, &chat_sequences)];
+    eprintln!("=== PRE-TRAINING ===");
+    let pretrain_loss = train_pretraining(dataset, llm, true);
+    trajectory_ce.push(mean_heldout_ce(llm, &chat_sequences));
+
+    eprintln!("=== INSTRUCTION TUNING ===");
+    let mut tuning_loss = Vec::new();
+    let part_epochs = TUNING_EPOCHS / TUNING_CE_SAMPLES;
+    for _ in 0..TUNING_CE_SAMPLES {
+        tuning_loss.extend(train_tuning_part(dataset, llm, part_epochs, true));
+        trajectory_ce.push(mean_heldout_ce(llm, &chat_sequences));
+    }
+
+    save_checkpoint(llm, model_path);
+
     let mut items = Vec::new();
+    let mut accuracies = Vec::new();
     let mut exact_total = 0usize;
     let mut prefix_total = 0usize;
-    let mut accuracy_sum = 0.0f32;
 
     for (prompt_text, reference) in &heldout {
         let prompt = format!("User: {prompt_text}");
@@ -121,7 +151,7 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM) {
         let score = llm.answer_score(&prompt, reference);
         exact_total += usize::from(score.exact);
         prefix_total += usize::from(score.prefix);
-        accuracy_sum += score.accuracy;
+        accuracies.push(score.accuracy);
         items.push(serde_json::json!({
             "prompt": prompt_text,
             "reference": reference,
@@ -132,6 +162,13 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM) {
         }));
     }
 
+    accuracies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median = match accuracies.len() {
+        0 => 0.0,
+        n if n % 2 == 1 => accuracies[n / 2],
+        n => (accuracies[n / 2 - 1] + accuracies[n / 2]) / 2.0,
+    };
+
     println!(
         "{}",
         serde_json::json!({
@@ -141,14 +178,32 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM) {
             "summary": {
                 "exact_matches": exact_total,
                 "prefix_matches": prefix_total,
-                "mean_accuracy": accuracy_sum / heldout.len().max(1) as f32,
+                "mean_accuracy": accuracies.iter().sum::<f32>() / accuracies.len().max(1) as f32,
+                "accuracy_min": accuracies.first().copied().unwrap_or(0.0),
+                "accuracy_median": median,
+                "accuracy_max": accuracies.last().copied().unwrap_or(0.0),
+            },
+            "trajectory": {
+                "pretrain_loss": pretrain_loss,
+                "tuning_loss": tuning_loss,
+                "heldout_ce": trajectory_ce,
             },
             "items": items,
         })
     );
 }
 
-fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM) {
+fn save_checkpoint(llm: &mut LLM, model_path: Option<&str>) {
+    if let Some(path) = model_path {
+        llm::save(llm, path).unwrap_or_else(|error| {
+            eprintln!("error: failed to save checkpoint {path}: {error}");
+            std::process::exit(1);
+        });
+        eprintln!("Checkpoint saved to {path}");
+    }
+}
+
+fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM, model_path: Option<&str>) {
     let string = String::from("User: How do mountains form?");
 
     println!("\n=== MODEL INFORMATION ===");
@@ -171,15 +226,7 @@ fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM) {
         PRETRAINING_EPOCHS,
         PRETRAINING_LR
     );
-    llm.train(
-        dataset
-            .pretraining_data
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<&str>>(),
-        PRETRAINING_EPOCHS,
-        PRETRAINING_LR,
-    );
+    train_pretraining(dataset, llm, false);
 
     println!("\n=== INSTRUCTION TUNING ===");
     println!(
@@ -188,15 +235,9 @@ fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM) {
         TUNING_EPOCHS,
         TUNING_LR
     );
-    llm.train(
-        dataset
-            .chat_training_data
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<&str>>(),
-        TUNING_EPOCHS,
-        TUNING_LR,
-    );
+    train_tuning_part(dataset, llm, TUNING_EPOCHS, false);
+
+    save_checkpoint(llm, model_path);
 
     println!("\n=== AFTER TRAINING ===");
     println!("Input: {}", string);

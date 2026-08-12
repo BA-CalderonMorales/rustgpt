@@ -1,3 +1,6 @@
+use bincode::config::standard;
+use bincode::error::{DecodeError, EncodeError};
+use bincode::serde::{decode_from_slice, encode_to_vec};
 use ndarray::{Array2, Axis};
 use rand_distr::{Distribution, Normal};
 
@@ -49,5 +52,17 @@ impl Layer for OutputProjection {
 
     fn parameters(&self) -> usize {
         self.w_out.len() + self.b_out.len()
+    }
+
+    fn parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        encode_to_vec((&self.w_out, &self.b_out), standard())
+    }
+
+    fn load_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        let (w_out, b_out) =
+            decode_from_slice::<(Array2<f32>, Array2<f32>), _>(bytes, standard())?.0;
+        self.w_out = w_out;
+        self.b_out = b_out;
+        Ok(())
     }
 }

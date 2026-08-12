@@ -1,3 +1,6 @@
+use bincode::config::standard;
+use bincode::error::{DecodeError, EncodeError};
+use bincode::serde::{decode_from_slice, encode_to_vec};
 use ndarray::{Array2, Axis};
 
 use super::LayerNorm;
@@ -83,5 +86,27 @@ impl Layer for LayerNorm {
 
     fn parameters(&self) -> usize {
         self.gamma.len() + self.beta.len()
+    }
+
+    fn parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        self.leaf_parameter_bytes()
+    }
+
+    fn load_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        self.load_leaf_parameter_bytes(bytes)
+    }
+}
+
+impl LayerNorm {
+    pub(crate) fn leaf_parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        encode_to_vec((&self.gamma, &self.beta), standard())
+    }
+
+    pub(crate) fn load_leaf_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        let (gamma, beta) =
+            decode_from_slice::<(Array2<f32>, Array2<f32>), _>(bytes, standard())?.0;
+        self.gamma = gamma;
+        self.beta = beta;
+        Ok(())
     }
 }

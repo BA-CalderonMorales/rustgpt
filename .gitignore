@@ -1,1 +1,4 @@
 /target
+
+# Local trained checkpoints are artifacts, never source
+/models/

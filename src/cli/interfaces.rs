@@ -7,4 +7,5 @@ pub(crate) enum Mode {
 pub(crate) struct Invocation {
     pub mode: Mode,
     pub seed: u64,
+    pub model: Option<String>,
 }

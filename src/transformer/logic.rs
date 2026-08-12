@@ -1,3 +1,6 @@
+use bincode::config::standard;
+use bincode::error::{DecodeError, EncodeError};
+use bincode::serde::{decode_from_slice, encode_to_vec};
 use ndarray::Array2;
 
 use super::TransformerBlock;
@@ -51,5 +54,29 @@ impl Layer for TransformerBlock {
             + self.feed_forward.parameters()
             + self.norm1.parameters()
             + self.norm2.parameters()
+    }
+
+    fn parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        let parts = vec![
+            self.attention.parameter_bytes()?,
+            self.feed_forward.parameter_bytes()?,
+            self.norm1.parameter_bytes()?,
+            self.norm2.parameter_bytes()?,
+        ];
+        encode_to_vec(&parts, standard())
+    }
+
+    fn load_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        let mut parts = decode_from_slice::<Vec<Vec<u8>>, _>(bytes, standard())?.0;
+        if parts.len() != 4 {
+            return Err(DecodeError::OtherString(
+                "TransformerBlock checkpoint must contain 4 parts".into(),
+            ));
+        }
+        self.attention.load_parameter_bytes(&parts.remove(0))?;
+        self.feed_forward.load_parameter_bytes(&parts.remove(0))?;
+        self.norm1.load_parameter_bytes(&parts.remove(0))?;
+        self.norm2.load_parameter_bytes(&parts.remove(0))?;
+        Ok(())
     }
 }

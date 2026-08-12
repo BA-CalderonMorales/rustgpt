@@ -19,12 +19,13 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--seed <n>] [--e2e <prompt> | --eval]\n",
+        "Usage: llm [--seed <n>] [--model <path>] [--e2e <prompt> | --eval]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
         "  llm --e2e \"hello world\"\n",
         "  llm --eval --seed 42\n",
+        "  llm --model models/mine.bin --eval --seed 42\n",
     );
 
     for flag in ["--help", "-h"] {
@@ -136,4 +137,74 @@ fn eval_and_e2e_are_mutually_exclusive() {
         stderr(&output),
         "error: --e2e and --eval are mutually exclusive\nTry 'llm --help' for usage.\n"
     );
+}
+
+#[test]
+fn model_requires_a_path() {
+    let output = run(&["--model"], &std::env::temp_dir());
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: --model requires a path\nTry 'llm --help' for usage.\n"
+    );
+}
+
+#[test]
+fn e2e_with_checkpoint_loads_and_serves_the_saved_model() {
+    let checkpoint_dir = std::env::temp_dir().join("rustgpt-cli-checkpoint");
+    std::fs::create_dir_all(&checkpoint_dir).unwrap();
+    let path = checkpoint_dir.join("model.bin");
+
+    let data = llm::Dataset::new(
+        String::from("data/pretraining_data.json"),
+        String::from("data/chat_training_data.json"),
+        llm::DatasetType::JSON,
+    );
+    llm::set_seed(21);
+    let model = {
+        let mut vocab_set = std::collections::HashSet::new();
+        llm::Vocab::process_text_for_vocab(&data.pretraining_data, &mut vocab_set);
+        llm::Vocab::process_text_for_vocab(&data.chat_training_data, &mut vocab_set);
+        let mut words: Vec<String> = vocab_set.into_iter().collect();
+        words.sort();
+        let refs: Vec<&str> = words.iter().map(String::as_str).collect();
+        let vocab = llm::Vocab::new(refs);
+        let network: Vec<Box<dyn llm::Layer>> = vec![
+            Box::new(llm::Embeddings::new(vocab.clone())),
+            Box::new(llm::transformer::TransformerBlock::new(
+                llm::EMBEDDING_DIM,
+                llm::HIDDEN_DIM,
+            )),
+            Box::new(llm::transformer::TransformerBlock::new(
+                llm::EMBEDDING_DIM,
+                llm::HIDDEN_DIM,
+            )),
+            Box::new(llm::transformer::TransformerBlock::new(
+                llm::EMBEDDING_DIM,
+                llm::HIDDEN_DIM,
+            )),
+            Box::new(llm::output_projection::OutputProjection::new(
+                llm::EMBEDDING_DIM,
+                vocab.words.len(),
+            )),
+        ];
+        let examples: Vec<&str> = data.chat_training_data.iter().map(String::as_str).collect();
+        let mut model = llm::LLM::new(vocab, network);
+        model.train(examples, 2, 0.0005);
+        model
+    };
+    llm::save(&model, path.to_str().unwrap()).expect("checkpoint save should succeed");
+
+    let output = run(
+        &["--model", path.to_str().unwrap(), "--e2e", "hello world"],
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let response: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim_end()).expect("one JSON object");
+    assert_eq!(response["status"].as_str(), Some("ok"));
+    assert_eq!(response["total_parameters"].as_u64(), Some(380_893));
+
+    std::fs::remove_dir_all(checkpoint_dir).ok();
 }

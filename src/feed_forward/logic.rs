@@ -1,3 +1,6 @@
+use bincode::config::standard;
+use bincode::error::{DecodeError, EncodeError};
+use bincode::serde::{decode_from_slice, encode_to_vec};
 use ndarray::{Array2, Axis};
 use rand_distr::{Distribution, Normal};
 
@@ -144,5 +147,32 @@ impl Layer for FeedForward {
 
     fn parameters(&self) -> usize {
         self.b1.len() + self.b2.len() + self.w1.len() + self.w2.len()
+    }
+
+    fn parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        self.leaf_parameter_bytes()
+    }
+
+    fn load_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        self.load_leaf_parameter_bytes(bytes)
+    }
+}
+
+impl FeedForward {
+    pub(crate) fn leaf_parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        encode_to_vec((&self.w1, &self.b1, &self.w2, &self.b2), standard())
+    }
+
+    pub(crate) fn load_leaf_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        let (w1, b1, w2, b2) = decode_from_slice::<
+            (Array2<f32>, Array2<f32>, Array2<f32>, Array2<f32>),
+            _,
+        >(bytes, standard())?
+        .0;
+        self.w1 = w1;
+        self.b1 = b1;
+        self.w2 = w2;
+        self.b2 = b2;
+        Ok(())
     }
 }

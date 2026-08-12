@@ -1,3 +1,6 @@
+use bincode::config::standard;
+use bincode::error::{DecodeError, EncodeError};
+use bincode::serde::{decode_from_slice, encode_to_vec};
 use ndarray::{Array2, s};
 use rand_distr::{Distribution, Normal};
 
@@ -131,5 +134,20 @@ impl Layer for Embeddings {
 
     fn parameters(&self) -> usize {
         self.token_embeddings.len() + self.positional_embeddings.len()
+    }
+
+    fn parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        encode_to_vec(
+            (&self.token_embeddings, &self.positional_embeddings),
+            standard(),
+        )
+    }
+
+    fn load_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        let (token, positional) =
+            decode_from_slice::<(Array2<f32>, Array2<f32>), _>(bytes, standard())?.0;
+        self.token_embeddings = token;
+        self.positional_embeddings = positional;
+        Ok(())
     }
 }

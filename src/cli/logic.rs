@@ -3,18 +3,20 @@ use super::{Invocation, Mode};
 const DEFAULT_SEED: u64 = 42;
 
 fn usage() {
-    println!("Usage: llm [--seed <n>] [--e2e <prompt> | --eval]");
+    println!("Usage: llm [--seed <n>] [--model <path>] [--e2e <prompt> | --eval]");
     println!();
     println!("Examples:");
     println!("  llm");
     println!("  llm --e2e \"hello world\"");
     println!("  llm --eval --seed 42");
+    println!("  llm --model models/mine.bin --eval --seed 42");
 }
 
 fn try_parse() -> Result<Invocation, String> {
     let mut args = std::env::args().skip(1);
     let mut mode: Option<Mode> = None;
     let mut seed: Option<u64> = None;
+    let mut model: Option<String> = None;
 
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -35,6 +37,12 @@ fn try_parse() -> Result<Invocation, String> {
                         .parse()
                         .map_err(|_| format!("invalid seed: {value}"))?,
                 );
+            }
+            "--model" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--model requires a path".to_string())?;
+                model = Some(value);
             }
             "--e2e" => {
                 if mode.is_some() {
@@ -64,7 +72,7 @@ fn try_parse() -> Result<Invocation, String> {
         Mode::Interactive => rand::random::<u64>(),
     });
 
-    Ok(Invocation { mode, seed })
+    Ok(Invocation { mode, seed, model })
 }
 
 pub(crate) fn parse_invocation() -> Invocation {

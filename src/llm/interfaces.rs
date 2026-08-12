@@ -10,6 +10,12 @@ pub trait Layer {
     fn backward(&mut self, grads: &Array2<f32>, lr: f32) -> Array2<f32>;
 
     fn parameters(&self) -> usize;
+
+    /// Encode the layer's learned weights for checkpointing.
+    fn parameter_bytes(&self) -> Result<Vec<u8>, bincode::error::EncodeError>;
+
+    /// Restore learned weights from `parameter_bytes` output.
+    fn load_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), bincode::error::DecodeError>;
 }
 
 #[allow(clippy::upper_case_acronyms)]

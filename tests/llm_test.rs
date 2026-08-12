@@ -18,6 +18,14 @@ impl Layer for TestOutputProjectionLayer {
         "TestOutputProjectionLayer"
     }
 
+    fn parameter_bytes(&self) -> Result<Vec<u8>, bincode::error::EncodeError> {
+        Ok(Vec::new())
+    }
+
+    fn load_parameter_bytes(&mut self, _bytes: &[u8]) -> Result<(), bincode::error::DecodeError> {
+        Ok(())
+    }
+
     fn forward(&mut self, input: &Array2<f32>) -> Array2<f32> {
         self.cache_input = Some(input.clone());
         let mut mock_output = Array2::zeros((input.shape()[1], self.vocab_size));

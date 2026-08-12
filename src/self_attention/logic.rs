@@ -1,5 +1,8 @@
 use std::f32;
 
+use bincode::config::standard;
+use bincode::error::{DecodeError, EncodeError};
+use bincode::serde::{decode_from_slice, encode_to_vec};
 use ndarray::Array2;
 use rand_distr::{Distribution, Normal};
 
@@ -172,5 +175,28 @@ impl Layer for SelfAttention {
 
     fn parameters(&self) -> usize {
         self.w_k.len() + self.w_q.len() + self.w_v.len()
+    }
+
+    fn parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        self.leaf_parameter_bytes()
+    }
+
+    fn load_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        self.load_leaf_parameter_bytes(bytes)
+    }
+}
+
+impl SelfAttention {
+    pub(crate) fn leaf_parameter_bytes(&self) -> Result<Vec<u8>, EncodeError> {
+        encode_to_vec((&self.w_q, &self.w_k, &self.w_v), standard())
+    }
+
+    pub(crate) fn load_leaf_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
+        let (w_q, w_k, w_v) =
+            decode_from_slice::<(Array2<f32>, Array2<f32>, Array2<f32>), _>(bytes, standard())?.0;
+        self.w_q = w_q;
+        self.w_k = w_k;
+        self.w_v = w_v;
+        Ok(())
     }
 }

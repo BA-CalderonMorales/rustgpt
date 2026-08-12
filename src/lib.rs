@@ -1,4 +1,5 @@
 pub mod adam;
+mod checkpoint;
 mod configuration;
 pub mod dataset_loader;
 pub mod embeddings;
@@ -10,6 +11,7 @@ pub mod self_attention;
 pub mod transformer;
 pub mod vocab;
 
+pub use checkpoint::{load, save};
 pub use configuration::{EMBEDDING_DIM, HIDDEN_DIM, MAX_SEQ_LEN, seed, set_seed};
 pub use dataset_loader::{Dataset, DatasetType};
 pub use embeddings::Embeddings;
