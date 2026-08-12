@@ -1,0 +1,96 @@
+name: Release
+
+# Release cadence: push to main that changes the crate version cuts a GitHub
+# release. Bump `version` in Cargo.toml, push to main, and the workflow tags
+# v<version> and publishes the release binary with checksums and auto-generated
+# notes. The tag is created once per version; repeated pushes of the same
+# version skip release (unless forced with workflow_dispatch).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rustgpt-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Read version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if tag already exists
+        id: tagcheck
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "force=true" >> "$GITHUB_OUTPUT"
+          else
+            if git ls-remote --tags --exit-code origin "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Build release binary
+        if: steps.tagcheck.outputs.skip != 'true'
+        run: |
+          cargo build --release --locked
+
+      - name: Package assets
+        if: steps.tagcheck.outputs.skip != 'true'
+        run: |
+          mkdir -p dist
+          BIN="${{ steps.version.outputs.version }}"
+          cp target/release/llm "dist/llm-$BIN-linux-x86_64"
+          tar czf "dist/llm-$BIN-linux-x86_64.tar.gz" -C dist "llm-$BIN-linux-x86_64"
+          (cd dist && sha256sum * > checksums.txt)
+
+      - name: Create and push tag
+        if: steps.tagcheck.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create GitHub Release
+        if: steps.tagcheck.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: RustGPT ${{ steps.version.outputs.tag }}
+          body: |
+            RustGPT learning-build release. From-scratch transformer language
+            model in pure Rust (ndarray, no external ML framework).
+
+            See [docs](docs/) for the model, dataset, and testing boundaries.
+            E2E contract probe: `./llm --e2e "hello world"` from the archive.
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.version.outputs.tag, 'alpha') || contains(steps.version.outputs.tag, 'beta') || contains(steps.version.outputs.tag, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
