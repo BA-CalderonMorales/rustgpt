@@ -19,13 +19,14 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--seed <n>] [--model <path>] [--e2e <prompt> | --eval]\n",
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--e2e <prompt> | --eval | --train <file.jsonl>]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
         "  llm --e2e \"hello world\"\n",
         "  llm --eval --seed 42\n",
         "  llm --model models/mine.bin --eval --seed 42\n",
+        "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin\n",
     );
 
     for flag in ["--help", "-h"] {
@@ -69,7 +70,7 @@ fn e2e_requires_exactly_one_prompt() {
         ),
         (
             vec!["--e2e", "hello", "extra"],
-            "error: --e2e accepts exactly one prompt\nTry 'llm --help' for usage.\n",
+            "error: mode argument accepts exactly one value\nTry 'llm --help' for usage.\n",
         ),
     ] {
         let output = run(&arguments, &std::env::temp_dir());
@@ -135,7 +136,7 @@ fn eval_and_e2e_are_mutually_exclusive() {
     assert_eq!(stdout(&output), "");
     assert_eq!(
         stderr(&output),
-        "error: --e2e and --eval are mutually exclusive\nTry 'llm --help' for usage.\n"
+        "error: --e2e, --eval, and --train are mutually exclusive\nTry 'llm --help' for usage.\n"
     );
 }
 

@@ -51,3 +51,29 @@ fn get_data_from_csv(path: String) -> Vec<String> {
     }
     data
 }
+
+/// Load one JSON Lines corpus: one story per line.
+///
+/// Each line is either a bare string or a JSON object with a `text` field.
+/// Lines that fail to parse are skipped, so a file can mix both forms.
+pub fn load_jsonl(path: &str) -> Vec<String> {
+    let content = std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
+    content
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("text")
+                        .and_then(|text| text.as_str().map(String::from))
+                        .or_else(|| value.as_str().map(String::from))
+                })
+        })
+        .collect()
+}

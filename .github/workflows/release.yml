@@ -77,18 +77,19 @@ jobs:
           git tag "${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
 
+      - name: Build release body from CHANGELOG
+        if: steps.tagcheck.outputs.skip != 'true'
+        run: |
+          awk '/^## /{c++} c==1' CHANGELOG.md > release_body.md
+          wc -l release_body.md
+
       - name: Create GitHub Release
         if: steps.tagcheck.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          body: |
-            RustGPT learning-build release. From-scratch transformer language
-            model in pure Rust (ndarray, no external ML framework).
-
-            See [docs](docs/) for the model, dataset, and testing boundaries.
-            E2E contract probe: `./llm --e2e "hello world"` from the archive.
+          body_path: release_body.md
           files: dist/*
           generate_release_notes: true
           prerelease: ${{ contains(steps.version.outputs.tag, 'alpha') || contains(steps.version.outputs.tag, 'beta') || contains(steps.version.outputs.tag, 'rc') }}

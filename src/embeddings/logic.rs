@@ -23,12 +23,16 @@ impl Default for Embeddings {
 
 impl Embeddings {
     pub fn new(vocab: Vocab) -> Self {
+        Self::with_dims(vocab, EMBEDDING_DIM, MAX_SEQ_LEN)
+    }
+
+    pub fn with_dims(vocab: Vocab, embedding_dim: usize, max_seq_len: usize) -> Self {
         Self {
-            token_embeddings: Self::init_embeddings(vocab.words.len(), EMBEDDING_DIM),
-            positional_embeddings: Self::init_positional_embeddings(MAX_SEQ_LEN, EMBEDDING_DIM),
+            token_embeddings: Self::init_embeddings(vocab.words.len(), embedding_dim),
+            positional_embeddings: Self::init_positional_embeddings(max_seq_len, embedding_dim),
             cached_input: None,
-            token_optimizer: Adam::new((vocab.words.len(), EMBEDDING_DIM)),
-            positional_optimizer: Adam::new((MAX_SEQ_LEN, EMBEDDING_DIM)),
+            token_optimizer: Adam::new((vocab.words.len(), embedding_dim)),
+            positional_optimizer: Adam::new((max_seq_len, embedding_dim)),
         }
     }
 

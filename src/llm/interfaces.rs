@@ -22,6 +22,8 @@ pub trait Layer {
 pub struct LLM {
     pub vocab: Vocab,
     pub network: Vec<Box<dyn Layer>>,
+    pub max_seq_len: usize,
+    pub config: crate::configuration::Config,
 }
 
 /// One scored answer against a reference: exact equality, prefix match, and

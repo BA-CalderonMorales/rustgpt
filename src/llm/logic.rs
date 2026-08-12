@@ -19,13 +19,33 @@ impl Default for LLM {
                 Box::new(transformer_block),
                 Box::new(output_projection),
             ],
+            max_seq_len: MAX_SEQ_LEN,
+            config: crate::configuration::Config::micro(),
         }
     }
 }
 
 impl LLM {
     pub fn new(vocab: Vocab, network: Vec<Box<dyn Layer>>) -> Self {
-        Self { vocab, network }
+        Self {
+            vocab,
+            network,
+            max_seq_len: MAX_SEQ_LEN,
+            config: crate::configuration::Config::micro(),
+        }
+    }
+
+    pub fn with_config(
+        vocab: Vocab,
+        network: Vec<Box<dyn Layer>>,
+        config: crate::configuration::Config,
+    ) -> Self {
+        Self {
+            vocab,
+            network,
+            max_seq_len: config.max_seq_len,
+            config,
+        }
     }
 }
 
@@ -75,16 +95,14 @@ impl LLM {
 
         let input_len = tokenized.len();
 
-        // Prevent overflow if input_len >= MAX_SEQ_LEN
-        if input_len >= MAX_SEQ_LEN {
+        // Prevent overflow if input_len >= max_seq_len
+        if input_len >= self.max_seq_len {
             return output_tokens;
         }
 
-        for _ in 0..(MAX_SEQ_LEN - input_len) {
-            // let tokenized_clone = tokenized.clone();
-
+        for _ in 0..(self.max_seq_len - input_len) {
             // Check if we're approaching the maximum sequence length
-            if output_tokens.len() >= MAX_SEQ_LEN - 1 {
+            if output_tokens.len() >= self.max_seq_len - 1 {
                 break;
             }
 
@@ -155,7 +173,11 @@ impl LLM {
     ) -> Vec<f32> {
         let tokenized_data = data
             .iter()
-            .map(|input| self.tokenize(input))
+            .map(|input| {
+                let mut tokens = self.tokenize(input);
+                tokens.truncate(self.max_seq_len);
+                tokens
+            })
             .collect::<Vec<Vec<usize>>>();
 
         let mut epoch_losses = Vec::with_capacity(epochs);
@@ -221,7 +243,8 @@ impl LLM {
     /// exactly the signal training optimizes. This is the trajectory probe
     /// for held-out data.
     pub fn sequence_loss(&mut self, text: &str) -> f32 {
-        let tokens = self.tokenize(text);
+        let mut tokens = self.tokenize(text);
+        tokens.truncate(self.max_seq_len);
         if tokens.len() < 2 {
             return 0.0;
         }

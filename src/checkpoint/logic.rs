@@ -5,20 +5,21 @@ use bincode::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    EMBEDDING_DIM, HIDDEN_DIM, LLM, Layer, Vocab, embeddings::Embeddings,
-    output_projection::OutputProjection, seed, transformer::TransformerBlock,
+    Config, LLM, Layer, Vocab, embeddings::Embeddings, output_projection::OutputProjection, seed,
+    transformer::TransformerBlock,
 };
 
-/// Checkpoint format v1: magic header, then one bincode `CheckpointData`.
+/// Checkpoint format v2: magic header, then one bincode `CheckpointData`.
 ///
 /// Trained weights only (no optimizer state, no transient caches):
 /// loading resets optimizers, exactly as a fresh model would.
-const MAGIC: &[u8] = b"RGPT_V1";
+const MAGIC: &[u8] = b"RGPT_V2";
 
 #[derive(Serialize, Deserialize)]
 struct CheckpointData {
     seed: u64,
     vocab: Vec<String>,
+    config: Config,
     layers: Vec<(String, Vec<u8>)>,
 }
 
@@ -35,6 +36,7 @@ pub fn save(llm: &LLM, path: &str) -> std::io::Result<()> {
     let data = CheckpointData {
         seed: seed(),
         vocab: llm.vocab.words.clone(),
+        config: llm.config,
         layers,
     };
 
@@ -66,13 +68,21 @@ pub fn load(path: &str) -> std::io::Result<LLM> {
     let vocab_words_refs: Vec<&str> = data.vocab.iter().map(String::as_str).collect();
     let vocab = Vocab::new(vocab_words_refs);
 
-    let mut network: Vec<Box<dyn Layer>> = vec![
-        Box::new(Embeddings::new(vocab.clone())),
-        Box::new(TransformerBlock::new(EMBEDDING_DIM, HIDDEN_DIM)),
-        Box::new(TransformerBlock::new(EMBEDDING_DIM, HIDDEN_DIM)),
-        Box::new(TransformerBlock::new(EMBEDDING_DIM, HIDDEN_DIM)),
-        Box::new(OutputProjection::new(EMBEDDING_DIM, vocab.words.len())),
-    ];
+    let mut network: Vec<Box<dyn Layer>> = vec![Box::new(Embeddings::with_dims(
+        vocab.clone(),
+        data.config.embedding_dim,
+        data.config.max_seq_len,
+    ))];
+    for _ in 0..data.config.block_count {
+        network.push(Box::new(TransformerBlock::new(
+            data.config.embedding_dim,
+            data.config.hidden_dim,
+        )));
+    }
+    network.push(Box::new(OutputProjection::new(
+        data.config.embedding_dim,
+        vocab.words.len(),
+    )));
 
     if network.len() != data.layers.len() {
         return Err(std::io::Error::other("checkpoint layer count mismatch"));
@@ -90,5 +100,5 @@ pub fn load(path: &str) -> std::io::Result<LLM> {
             .map_err(std::io::Error::other)?;
     }
 
-    Ok(LLM::new(vocab, network))
+    Ok(LLM::with_config(vocab, network, data.config))
 }

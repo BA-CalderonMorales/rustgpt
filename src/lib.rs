@@ -12,8 +12,8 @@ pub mod transformer;
 pub mod vocab;
 
 pub use checkpoint::{load, save};
-pub use configuration::{EMBEDDING_DIM, HIDDEN_DIM, MAX_SEQ_LEN, seed, set_seed};
-pub use dataset_loader::{Dataset, DatasetType};
+pub use configuration::{Config, EMBEDDING_DIM, HIDDEN_DIM, MAX_SEQ_LEN, seed, set_seed};
+pub use dataset_loader::{Dataset, DatasetType, load_jsonl};
 pub use embeddings::Embeddings;
 pub use llm::{AnswerScore, LLM, Layer};
 pub use vocab::Vocab;

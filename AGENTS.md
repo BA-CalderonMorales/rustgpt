@@ -114,6 +114,10 @@ the "game" is the math itself:
 - **Version lives only in `Cargo.toml`.** `Cargo.lock` and the README badge
   mirror it; the CLI version contract derives from `CARGO_PKG_VERSION`, never
   from a literal. Bump, push, release in one motion.
+- **Every release ships its changelog entry.** `CHANGELOG.md` entries carry
+  measured evidence (scores, trajectory highlights, artifacts), and the
+  release body is the top section of that file. A release without its entry
+  is an incomplete release.
 - **Never merge dev-local ledgers.** Workspace `scratch/` goal ledgers and
   local experiment notes are developer-local; they never commit here. Use
   `rg` for content search when available, `fzf` for interactive selection.
@@ -176,4 +180,5 @@ cargo test --all-targets
 cargo run -- --e2e "hello world"   # contract probe only
 cargo run -- --eval --seed 42      # score formula: held-out eval
 cargo run -- --model models/mine.bin --eval --seed 42   # checkpoint round-trip
+cargo run -- --tiny --train models/tinystories/train.jsonl --epochs 1   # laptop lane
 ```

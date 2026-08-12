@@ -107,3 +107,27 @@ The baseline did not finish its 200 training epochs within a 30.62-second
 bounded run; it reached instruction epoch 90 after completing pretraining.
 These timings show a large practical improvement, but ordinary run-to-run and
 cache noise still applies.
+
+## TinyStories Lane (v0.0.4)
+
+Second corpus arena for the `--tiny` preset. Source:
+[roneneldan/TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories)
+(Eldan & Li, 2023), license **CDLA-Sharing-1.0** (open data license, no
+paywall; recorded 2026-08-12). Free-open-data rule satisfied; cite the source
+in any artifact.
+
+Rebuild the local slice (gitignored under `models/tinystories/`):
+
+```bash
+curl -L -o models/tinystories/TinyStories-train.txt \
+  "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStories-train.txt"
+python3 scripts/slice_tinystories.py  # 40k stories, <=120 words each -> train.jsonl
+```
+
+Measured baseline (2026-08-12, laptop CPU, `--tiny`, seed 42, 1 epoch over
+40k stories / ~1.5M tokens): single-epoch loss 5.84 from a ln(vocab) ~ 8.1
+random start; greedy generation collapsed to the dominant token (`.`).
+Throughput measured at ~283 tokens/s -> ~10M tokens per 9.8 hours. The tiny
+preset at 14.2M params is therefore an overnight-slice tier, not a
+converged tier; batching or a GPU racecar (documented ADR candidate) is
+required before corpus-scale runs earn their hours.

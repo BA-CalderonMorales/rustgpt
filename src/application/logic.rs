@@ -32,7 +32,12 @@ pub(crate) fn load_heldout() -> Vec<(String, String)> {
     entries
 }
 
-pub(crate) fn build_llm(dataset: &Dataset, model_path: Option<&str>) -> LLM {
+pub(crate) fn build_llm(
+    dataset: &Dataset,
+    model_path: Option<&str>,
+    train_path: Option<&str>,
+    tiny: bool,
+) -> LLM {
     if let Some(path) = model_path
         && std::path::Path::new(path).exists()
     {
@@ -42,7 +47,47 @@ pub(crate) fn build_llm(dataset: &Dataset, model_path: Option<&str>) -> LLM {
             std::process::exit(1);
         });
     }
+    if let Some(path) = train_path {
+        if !tiny {
+            eprintln!(
+                "error: --train requires --tiny (the language-model lane is the tiny preset)"
+            );
+            std::process::exit(2);
+        }
+        let texts = llm::load_jsonl(path);
+        return build_tiny_llm(&texts);
+    }
     build_model(dataset)
+}
+
+/// Build the tiny preset (real-corpus lane) vocabulary and model.
+pub(crate) fn build_tiny_llm(texts: &[String]) -> LLM {
+    use llm::Config;
+
+    let config = Config::tiny();
+    let mut vocab_set = std::collections::HashSet::new();
+    Vocab::process_text_for_vocab(texts, &mut vocab_set);
+    let mut vocab_words: Vec<String> = vocab_set.into_iter().collect();
+    vocab_words.sort();
+    let vocab_words_refs: Vec<&str> = vocab_words.iter().map(String::as_str).collect();
+    let vocab = Vocab::new(vocab_words_refs);
+
+    let mut network: Vec<Box<dyn llm::Layer>> = vec![Box::new(Embeddings::with_dims(
+        vocab.clone(),
+        config.embedding_dim,
+        config.max_seq_len,
+    ))];
+    for _ in 0..config.block_count {
+        network.push(Box::new(TransformerBlock::new(
+            config.embedding_dim,
+            config.hidden_dim,
+        )));
+    }
+    network.push(Box::new(OutputProjection::new(
+        config.embedding_dim,
+        vocab.words.len(),
+    )));
+    LLM::with_config(vocab, network, config)
 }
 
 pub(crate) fn build_model(dataset: &Dataset) -> LLM {
@@ -76,10 +121,56 @@ pub(crate) fn run(invocation: Invocation, dataset: &Dataset, llm: &mut LLM) {
     match invocation.mode {
         Mode::E2e { prompt } => run_e2e(prompt, llm),
         Mode::Eval => run_training_and_eval(dataset, llm, invocation.model.as_deref()),
+        Mode::Train { path } => {
+            run_training_lm(&path, llm, invocation.model.as_deref(), invocation.epochs)
+        }
         Mode::Interactive => {
             run_training_and_interactive(dataset, llm, invocation.model.as_deref())
         }
     }
+}
+
+fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: usize) {
+    let texts = llm::load_jsonl(path);
+    if texts.len() < 2 {
+        eprintln!("error: --train needs at least 2 lines in {path}");
+        std::process::exit(1);
+    }
+
+    eprintln!(
+        "=== LANGUAGE MODEL TRAINING === {} stories, {} epochs, lr {}",
+        texts.len(),
+        epochs,
+        PRETRAINING_LR
+    );
+
+    let examples: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let losses = llm.train_with_progress(examples, epochs, PRETRAINING_LR, true);
+    save_checkpoint(llm, model_path);
+
+    let starters = ["Once upon a time,", "The sun", "Why did the"];
+    let samples: Vec<serde_json::Value> = starters
+        .iter()
+        .map(|starter| {
+            serde_json::json!({
+                "prompt": starter,
+                "generated": llm.predict(starter),
+            })
+        })
+        .collect();
+
+    println!(
+        "{}",
+        serde_json::json!({
+            "status": "ok",
+            "seed": llm::seed(),
+            "total_parameters": llm.total_parameters(),
+            "stories": texts.len(),
+            "epochs": epochs,
+            "trajectory": { "loss": losses },
+            "samples": samples,
+        })
+    );
 }
 
 fn run_e2e(prompt: String, llm: &mut LLM) {

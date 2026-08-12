@@ -2,3 +2,7 @@
 
 # Local trained checkpoints are artifacts, never source
 /models/
+
+# Demo recordings are regenerable artifacts
+scripts/demo/*.cast
+scripts/demo/*.rec

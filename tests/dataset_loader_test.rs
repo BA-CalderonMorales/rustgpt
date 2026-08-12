@@ -59,3 +59,25 @@ fn test_dataset_new_csv() {
     std::fs::remove_file(pretraining_csv).unwrap();
     std::fs::remove_file(chat_csv).unwrap();
 }
+
+#[test]
+fn jsonl_loader_reads_text_fields_and_bare_strings() {
+    let dir = std::env::temp_dir();
+    let path = dir.join("rustgpt-jsonl-test.jsonl");
+    std::fs::write(
+        &path,
+        "{\"text\": \"Once upon a time, a dog ran.\"}\n\"just a bare string\"\n\n{\"wrong\": 1}\n{\"text\": \"The end.\"}\n",
+    )
+    .unwrap();
+
+    let texts = llm::load_jsonl(path.to_str().unwrap());
+    assert_eq!(
+        texts,
+        vec![
+            "Once upon a time, a dog ran.".to_string(),
+            "just a bare string".to_string(),
+            "The end.".to_string(),
+        ]
+    );
+    std::fs::remove_file(path).ok();
+}
