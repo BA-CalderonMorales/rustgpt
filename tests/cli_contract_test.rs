@@ -39,7 +39,10 @@ fn version_prints_on_stdout_without_loading_data() {
     let output = run(&["--version"], &std::env::temp_dir());
 
     assert_eq!(output.status.code(), Some(0));
-    assert_eq!(stdout(&output), "llm 0.1.0\n");
+    assert_eq!(
+        stdout(&output),
+        format!("llm {}\n", env!("CARGO_PKG_VERSION"))
+    );
     assert_eq!(stderr(&output), "");
 }
 
