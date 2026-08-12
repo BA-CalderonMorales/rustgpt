@@ -1,5 +1,6 @@
-use rand::{SeedableRng, rngs::StdRng};
 use std::cell::Cell;
+
+use rand::{rngs::StdRng, SeedableRng};
 
 const DEFAULT_SEED: u64 = 42;
 
