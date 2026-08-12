@@ -15,7 +15,7 @@ impl Default for SelfAttention {
 impl SelfAttention {
     /// Initializes a Transformer with random Q, K, V weights
     pub fn new(embedding_dim: usize) -> Self {
-        let mut rng = rand::rng();
+        let mut rng = crate::configuration::random_source();
         // Xavier/He initialization: std = sqrt(2 / fan_in)
         let std = (2.0 / embedding_dim as f32).sqrt();
         let normal = Normal::new(0.0, std).unwrap();

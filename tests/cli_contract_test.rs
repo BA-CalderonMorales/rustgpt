@@ -19,11 +19,12 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--e2e <prompt>]\n",
+        "Usage: llm [--seed <n>] [--e2e <prompt> | --eval]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
         "  llm --e2e \"hello world\"\n",
+        "  llm --eval --seed 42\n",
     );
 
     for flag in ["--help", "-h"] {
@@ -105,4 +106,34 @@ fn e2e_emits_one_json_line_with_the_public_schema() {
             .is_some_and(|output| !output.is_empty())
     );
     assert_eq!(response["total_parameters"].as_u64(), Some(380_893));
+}
+
+#[test]
+fn eval_rejects_bad_seed_arguments() {
+    for (arguments, message) in [
+        (
+            vec!["--eval", "--seed"],
+            "error: --seed requires a value\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--eval", "--seed", "abc"],
+            "error: invalid seed: abc\nTry 'llm --help' for usage.\n",
+        ),
+    ] {
+        let output = run(&arguments, &std::env::temp_dir());
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(stderr(&output), message);
+    }
+}
+
+#[test]
+fn eval_and_e2e_are_mutually_exclusive() {
+    let output = run(&["--eval", "--e2e", "hi"], &std::env::temp_dir());
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: --e2e and --eval are mutually exclusive\nTry 'llm --help' for usage.\n"
+    );
 }

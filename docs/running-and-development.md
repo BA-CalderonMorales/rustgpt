@@ -43,6 +43,27 @@ training or interactive input. It writes one JSON object:
 This interface exists for smoke tests and public-contract evaluation. It does
 not claim that the generated text is semantically correct.
 
+## Evaluation Mode
+
+```bash
+cargo run -- --eval --seed 42
+```
+
+The `--eval` path trains both phases (progress on stderr), scores every
+prompt/reference pair in `data/heldout.json`, and writes exactly one JSON
+object to stdout with per-item and summary scores. The score formula is
+defined in terms of greedy generation against each reference:
+
+- `exact` -- generated tokens equal reference tokens,
+- `prefix` -- generated tokens are a non-empty prefix of the reference,
+- `accuracy` -- matching positions over the longer of the two sequences.
+
+Summary fields are `exact_matches`, `prefix_matches`, and `mean_accuracy`.
+Initialization is seeded; `--seed <n>` (default 42) makes every run
+reproducible: same seed, same model, same scores. Every claimed result must
+carry its seed. Debug builds are roughly 40x slower than release on a laptop;
+use `cargo build --release` for real measurements.
+
 ## Development Commands
 
 ```bash

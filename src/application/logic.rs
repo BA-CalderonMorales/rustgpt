@@ -8,7 +8,12 @@ use llm::{
     transformer::TransformerBlock,
 };
 
-use crate::cli::Mode;
+use crate::cli::{Invocation, Mode};
+
+const PRETRAINING_EPOCHS: usize = 100;
+const PRETRAINING_LR: f32 = 0.0005;
+const TUNING_EPOCHS: usize = 100;
+const TUNING_LR: f32 = 0.0001;
 
 pub(crate) fn load_datasets() -> Dataset {
     Dataset::new(
@@ -16,6 +21,14 @@ pub(crate) fn load_datasets() -> Dataset {
         String::from("data/chat_training_data.json"),
         DatasetType::JSON,
     )
+}
+
+pub(crate) fn load_heldout() -> Vec<(String, String)> {
+    let text = std::fs::read_to_string("data/heldout.json")
+        .expect("data/heldout.json must exist for --eval");
+    let entries: Vec<(String, String)> =
+        serde_json::from_str(&text).expect("data/heldout.json must list prompt/reference pairs");
+    entries
 }
 
 pub(crate) fn build_model(dataset: &Dataset) -> LLM {
@@ -45,9 +58,10 @@ pub(crate) fn build_model(dataset: &Dataset) -> LLM {
     )
 }
 
-pub(crate) fn run(mode: Mode, dataset: &Dataset, llm: &mut LLM) {
-    match mode {
+pub(crate) fn run(invocation: Invocation, dataset: &Dataset, llm: &mut LLM) {
+    match invocation.mode {
         Mode::E2e { prompt } => run_e2e(prompt, llm),
+        Mode::Eval => run_training_and_eval(dataset, llm),
         Mode::Interactive => run_training_and_interactive(dataset, llm),
     }
 }
@@ -65,29 +79,7 @@ fn run_e2e(prompt: String, llm: &mut LLM) {
     );
 }
 
-fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM) {
-    let string = String::from("User: How do mountains form?");
-
-    println!("\n=== MODEL INFORMATION ===");
-    println!("Network architecture: {}", llm.network_description());
-    println!(
-        "Model configuration -> max_seq_len: {}, embedding_dim: {}, hidden_dim: {}",
-        MAX_SEQ_LEN, EMBEDDING_DIM, HIDDEN_DIM
-    );
-    println!("Total parameters: {}", llm.total_parameters());
-
-    println!("\n=== BEFORE TRAINING ===");
-    println!("Input: {}", string);
-    println!("Output: {}", llm.predict(&string));
-
-    println!("\n=== PRE-TRAINING MODEL ===");
-    println!(
-        "Pre-training on {} examples for {} epochs with learning rate {}",
-        dataset.pretraining_data.len(),
-        100,
-        0.0005
-    );
-
+fn train_both(dataset: &Dataset, llm: &mut LLM, progress_to_stderr: bool) {
     let pretraining_examples: Vec<&str> = dataset
         .pretraining_data
         .iter()
@@ -99,17 +91,112 @@ fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM) {
         .map(String::as_str)
         .collect();
 
-    llm.train(pretraining_examples, 100, 0.0005);
+    llm.train_with_progress(
+        pretraining_examples,
+        PRETRAINING_EPOCHS,
+        PRETRAINING_LR,
+        progress_to_stderr,
+    );
+    llm.train_with_progress(
+        chat_training_examples,
+        TUNING_EPOCHS,
+        TUNING_LR,
+        progress_to_stderr,
+    );
+}
+
+fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM) {
+    eprintln!("=== PRE-TRAINING ===");
+    train_both(dataset, llm, true);
+
+    let heldout = load_heldout();
+    let mut items = Vec::new();
+    let mut exact_total = 0usize;
+    let mut prefix_total = 0usize;
+    let mut accuracy_sum = 0.0f32;
+
+    for (prompt_text, reference) in &heldout {
+        let prompt = format!("User: {prompt_text}");
+        let generated = llm.predict(&prompt);
+        let score = llm.answer_score(&prompt, reference);
+        exact_total += usize::from(score.exact);
+        prefix_total += usize::from(score.prefix);
+        accuracy_sum += score.accuracy;
+        items.push(serde_json::json!({
+            "prompt": prompt_text,
+            "reference": reference,
+            "generated": generated,
+            "exact": score.exact,
+            "prefix": score.prefix,
+            "accuracy": score.accuracy,
+        }));
+    }
+
+    println!(
+        "{}",
+        serde_json::json!({
+            "status": "ok",
+            "seed": llm::seed(),
+            "total_parameters": llm.total_parameters(),
+            "summary": {
+                "exact_matches": exact_total,
+                "prefix_matches": prefix_total,
+                "mean_accuracy": accuracy_sum / heldout.len().max(1) as f32,
+            },
+            "items": items,
+        })
+    );
+}
+
+fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM) {
+    let string = String::from("User: How do mountains form?");
+
+    println!("\n=== MODEL INFORMATION ===");
+    println!("Network architecture: {}", llm.network_description());
+    println!(
+        "Model configuration -> max_seq_len: {}, embedding_dim: {}, hidden_dim: {}",
+        MAX_SEQ_LEN, EMBEDDING_DIM, HIDDEN_DIM
+    );
+    println!("Total parameters: {}", llm.total_parameters());
+    println!("Seed: {}", llm::seed());
+
+    println!("\n=== BEFORE TRAINING ===");
+    println!("Input: {}", string);
+    println!("Output: {}", llm.predict(&string));
+
+    println!("\n=== PRE-TRAINING MODEL ===");
+    println!(
+        "Pre-training on {} examples for {} epochs with learning rate {}",
+        dataset.pretraining_data.len(),
+        PRETRAINING_EPOCHS,
+        PRETRAINING_LR
+    );
+    llm.train(
+        dataset
+            .pretraining_data
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<&str>>(),
+        PRETRAINING_EPOCHS,
+        PRETRAINING_LR,
+    );
 
     println!("\n=== INSTRUCTION TUNING ===");
     println!(
         "Instruction tuning on {} examples for {} epochs with learning rate {}",
         dataset.chat_training_data.len(),
-        100,
-        0.0001
+        TUNING_EPOCHS,
+        TUNING_LR
     );
-
-    llm.train(chat_training_examples, 100, 0.0001);
+    llm.train(
+        dataset
+            .chat_training_data
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<&str>>(),
+        TUNING_EPOCHS,
+        TUNING_LR,
+    );
 
     println!("\n=== AFTER TRAINING ===");
     println!("Input: {}", string);

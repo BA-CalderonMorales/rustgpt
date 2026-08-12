@@ -57,7 +57,7 @@ impl FeedForward {
         hidden_dim: usize,
         optimizer_kind: OptimizerKind,
     ) -> Self {
-        let mut rng = rand::rng();
+        let mut rng = crate::configuration::random_source();
 
         // Xavier/He initialization for w1: std = sqrt(2 / fan_in)
         let std_w1 = (2.0 / embedding_dim as f32).sqrt();

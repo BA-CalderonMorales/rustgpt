@@ -7,7 +7,7 @@ use crate::{adam::Adam, llm::Layer};
 impl OutputProjection {
     /// Initialize output layer with random weights and zero bias
     pub fn new(embedding_dim: usize, vocab_size: usize) -> Self {
-        let mut rng = rand::rng();
+        let mut rng = crate::configuration::random_source();
         // Xavier/He initialization: std = sqrt(2 / fan_in)
         let std = (2.0 / embedding_dim as f32).sqrt();
         let normal = Normal::new(0.0, std).unwrap();

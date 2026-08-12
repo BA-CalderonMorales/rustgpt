@@ -60,11 +60,16 @@ either training file:
 3. `User: Where does rainwater collect after rainwater flows downhill?`
 4. `User: What happens after rivers carry water to the ocean?`
 
-For one trained model, behavior is recognizable when at least three of the
-four outputs begin with `Assistant :`, express the expected water-cycle
-relation using corpus terms, and generate `</s>` before the sequence limit.
-Initialization is uncontrolled, so individual runs are observations rather
-than deterministic quality guarantees or causal proof.
+The same four prompts ship as prompt/reference pairs in `data/heldout.json`
+with canonical corpus-anchored answers. `cargo run -- --eval --seed 42` scores
+them (see `docs/running-and-development.md`); per-item `exact`/`prefix` and
+per-position `accuracy` are computed by `llm::answer_score`.
+
+The measured v0.0.2 baseline (seed 42): `exact_matches: 1/4`,
+`prefix_matches: 1/4`, `mean_accuracy: 0.3125`, with item 2 an exact match and
+item 3 a degenerate repetition loop. Behavior is recognizable when at least
+three of the four outputs begin with `Assistant :`; since seeding, runs are
+reproducible evidence rather than uncontrolled observations.
 
 ## Baseline and Inference Boundary
 

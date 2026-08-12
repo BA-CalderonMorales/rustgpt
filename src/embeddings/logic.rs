@@ -28,13 +28,13 @@ impl Embeddings {
     }
 
     fn init_embeddings(vocab_size: usize, embedding_dim: usize) -> Array2<f32> {
-        let mut rng = rand::rng();
+        let mut rng = crate::configuration::random_source();
         let normal = Normal::new(0.0, 0.02).unwrap(); // Increased for better learning
         Array2::from_shape_fn((vocab_size, embedding_dim), |_| normal.sample(&mut rng))
     }
 
     fn init_positional_embeddings(max_seq_len: usize, embedding_dim: usize) -> Array2<f32> {
-        let mut rng = rand::rng();
+        let mut rng = crate::configuration::random_source();
         let normal = Normal::new(0.0, 0.02).unwrap(); // Increased for better learning
         Array2::from_shape_fn((max_seq_len, embedding_dim), |_| normal.sample(&mut rng))
     }

@@ -1,4 +1,4 @@
 mod interfaces;
 mod logic;
 
-pub use interfaces::{LLM, Layer};
+pub use interfaces::{AnswerScore, LLM, Layer};

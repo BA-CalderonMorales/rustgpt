@@ -17,3 +17,11 @@ pub struct LLM {
     pub vocab: Vocab,
     pub network: Vec<Box<dyn Layer>>,
 }
+
+/// One scored answer against a reference: exact equality, prefix match, and
+/// per-position token accuracy.
+pub struct AnswerScore {
+    pub exact: bool,
+    pub prefix: bool,
+    pub accuracy: f32,
+}

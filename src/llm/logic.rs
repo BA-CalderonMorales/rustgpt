@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use ndarray::{Array1, Array2, Axis};
 
-use super::{LLM, Layer};
+use super::{AnswerScore, LLM, Layer};
 use crate::{
     EMBEDDING_DIM, Embeddings, HIDDEN_DIM, MAX_SEQ_LEN, Vocab, output_projection::OutputProjection,
     transformer::TransformerBlock,
@@ -132,6 +132,20 @@ impl LLM {
     }
 
     pub fn train(&mut self, data: Vec<&str>, epochs: usize, lr: f32) {
+        self.train_impl(data, epochs, lr, false);
+    }
+
+    pub fn train_with_progress(
+        &mut self,
+        data: Vec<&str>,
+        epochs: usize,
+        lr: f32,
+        progress_to_stderr: bool,
+    ) {
+        self.train_impl(data, epochs, lr, progress_to_stderr);
+    }
+
+    fn train_impl(&mut self, data: Vec<&str>, epochs: usize, lr: f32, progress_to_stderr: bool) {
         let tokenized_data = data
             .iter()
             .map(|input| self.tokenize(input))
@@ -181,11 +195,45 @@ impl LLM {
                 }
             }
 
-            println!(
+            let message = format!(
                 "Epoch {}: Loss = {:.4}",
                 epoch,
                 total_loss / tokenized_data.len() as f32
             );
+            if progress_to_stderr {
+                eprintln!("{message}");
+            } else {
+                println!("{message}");
+            }
+        }
+    }
+
+    /// Score a generated answer against a reference: greedy generation of
+    /// `text`, then exact / prefix / per-position accuracy on tokens.
+    pub fn answer_score(&mut self, text: &str, reference: &str) -> AnswerScore {
+        let predicted = self.predict(text);
+        let mut generated = self.tokenize(&predicted);
+        let reference_tokens = self.tokenize(reference);
+        if generated.last() == self.vocab.encode("</s>").as_ref() {
+            generated.pop();
+        }
+
+        let matching = generated
+            .iter()
+            .zip(&reference_tokens)
+            .filter(|(generated, reference)| generated == reference)
+            .count();
+        let positions = generated.len().max(reference_tokens.len()).max(1) as f32;
+
+        AnswerScore {
+            exact: generated == reference_tokens,
+            prefix: !generated.is_empty()
+                && generated.len() <= reference_tokens.len()
+                && generated
+                    .iter()
+                    .zip(&reference_tokens)
+                    .all(|(generated, reference)| generated == reference),
+            accuracy: matching as f32 / positions,
         }
     }
 

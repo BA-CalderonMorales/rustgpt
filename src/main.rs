@@ -2,8 +2,9 @@ mod application;
 mod cli;
 
 fn main() {
-    let mode = cli::parse_mode();
+    let invocation = cli::parse_invocation();
+    llm::set_seed(invocation.seed);
     let dataset = application::load_datasets();
-    let mut llm = application::build_model(&dataset);
-    application::run(mode, &dataset, &mut llm);
+    let mut model = application::build_model(&dataset);
+    application::run(invocation, &dataset, &mut model);
 }
