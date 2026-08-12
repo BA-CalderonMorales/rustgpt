@@ -4,7 +4,7 @@
 
 **A from-scratch transformer language model in pure Rust — inspectable mechanics, no external ML framework**
 
-[![Crate](https://img.shields.io/badge/version-0.0.2-blue.svg?logo=rust&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt)
+[![Crate](https://img.shields.io/badge/version-0.0.3-blue.svg?logo=rust&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Check](https://img.shields.io/github/actions/workflow/status/BA-CalderonMorales/rustgpt/check.yml?label=check&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/actions/workflows/check.yml)
 [![Test](https://img.shields.io/github/actions/workflow/status/BA-CalderonMorales/rustgpt/test.yml?label=test&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/actions/workflows/test.yml)
@@ -42,6 +42,7 @@ the mechanics, not a quality benchmark.
 | `cargo run` | Build vocab, pre-train + instruction-tune, chat interactively |
 | `cargo run -- --e2e "..."` | Initialize model, generate once, print one JSON object (`status`, `output`, `total_parameters`) |
 | `cargo run -- --eval --seed 42` | Train both phases, score the four held-out prompts, print one JSON object (`exact`/`prefix`/`accuracy`) |
+| `cargo run -- --model models/mine.bin --eval --seed 42` | Save/load a trained checkpoint; eval reports the training trajectory |
 | `cargo fmt --check` | Format gate |
 | `cargo clippy --workspace --all-features --all-targets -- -D warnings` | Lint gate |
 | `cargo test --all-targets` | Unit, property/invariant, integration, and contract tests |

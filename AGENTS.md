@@ -91,6 +91,11 @@ the "game" is the math itself:
   `llm::set_seed` (default 42, owned by `configuration/seed.rs`); every score
   must reproduce exactly with the same seed. Runs without a seed are
   observations; runs with a seed are evidence.
+- **Checkpoint discipline.** Trained models persist under `models/`
+  (gitignored) via format v1 (`checkpoint/`); the checkpoint plus its eval
+  JSON is the unit of evidence. Endpoints lie: `--eval` records the full
+  training trajectory (per-epoch loss, held-out CE samples), so a claim is
+  made with its curve, never just its final number.
 - **Free open data only.** New data derives from free-to-use sources (Kaggle,
   HuggingFace) under permissive licenses (MIT, Apache-2.0, CC-BY, OpenMDW-1.1).
   Record source and license in `docs/dataset-curation.md` before use;
@@ -170,4 +175,5 @@ cargo clippy --workspace --all-features --all-targets -- -D warnings
 cargo test --all-targets
 cargo run -- --e2e "hello world"   # contract probe only
 cargo run -- --eval --seed 42      # score formula: held-out eval
+cargo run -- --model models/mine.bin --eval --seed 42   # checkpoint round-trip
 ```

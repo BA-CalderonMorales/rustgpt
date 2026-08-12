@@ -64,6 +64,21 @@ reproducible: same seed, same model, same scores. Every claimed result must
 carry its seed. Debug builds are roughly 40x slower than release on a laptop;
 use `cargo build --release` for real measurements.
 
+## Checkpoints
+
+```bash
+cargo run --release -- --model models/mine.bin --eval --seed 42
+cargo run --release -- --model models/mine.bin --e2e "hello world"
+```
+
+`--model <path>` loads the checkpoint when the file exists; training modes
+(`--eval`, interactive) then re-save it after training, creating parent
+directories as needed. Checkpoints are format v1 (`RGPT_V1` magic header):
+the seed, the vocabulary, and each layer's learned weights. Optimizer state
+and transient caches are never stored, so a loaded model starts with fresh
+optimizers. Checkpoints live under `models/` (gitignored); a result is
+reproducible as the pair (checkpoint or seed) plus its eval JSON.
+
 ## Development Commands
 
 ```bash

@@ -20,6 +20,7 @@ an `LLM`.
 src/
 |-- main.rs               Parse, load, build, and run
 |-- lib.rs                Domain declarations and compatibility re-exports
+|-- checkpoint/           Checkpoint save/load (weights, vocab, seed)
 |-- cli/                   CLI mode and argument behavior
 |-- application/           Dataset, model, training, and interaction orchestration
 |-- configuration/         Shared model constants
