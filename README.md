@@ -1,77 +1,112 @@
-# rustgpt
+<div align="center">
 
-A from-scratch language-model implementation in pure Rust that uses `ndarray`
-for tensor operations and no external machine-learning framework.
+# RustGPT
 
-## Learning Project
+**A from-scratch transformer language model in pure Rust — inspectable mechanics, no external ML framework**
 
-This fork is my space to explore, learn, poke, observe, and shape a small
-language-model implementation in ways that make its design easier to
-understand. It favors inspectable Rust and explicit model mechanics over
-scale, output quality, or feature breadth.
+[![Crate](https://img.shields.io/badge/version-0.1.0-blue.svg?logo=rust&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Check](https://img.shields.io/github/actions/workflow/status/BA-CalderonMorales/rustgpt/check.yml?label=check&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/actions/workflows/check.yml)
+[![Test](https://img.shields.io/github/actions/workflow/status/BA-CalderonMorales/rustgpt/test.yml?label=test&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/actions/workflows/test.yml)
+[![Docs](https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/blob/main/docs/architecture.md)
 
-Correctness is separated by layer:
+</div>
 
-- Rust unit tests validate individual operations and components.
-- Mutation-resistant tests check meaningful optimizer invariants.
-- Integration tests exercise real model layers together.
-- The separate [rustgpt-evals](https://github.com/BA-CalderonMorales/rustgpt-evals)
-  project observes the public CLI contract as a black-box process.
+A complete language-model implementation — tokenization, embeddings,
+transformer blocks, optimization, training, and generation — built by hand
+with `ndarray` tensors and no machine-learning framework. The goal is a mental
+map of how a transformer works under the hood, not a competitive model:
+every layer is meant to be read, traced, and tested.
 
-The point is not to present a production LLM. The point is to build a mental
-map of tokenization, embeddings, transformer blocks, optimization, training,
-and generation by working with a complete implementation.
+## Quick Start
 
-## Run It
+Run the interactive training-and-chat loop, or use the fast machine-readable
+contract probe:
 
 ```bash
 git clone https://github.com/BA-CalderonMorales/rustgpt.git
 cd rustgpt
-cargo run
+cargo run                          # train on the water-cycle micro-domain, then chat
+cargo run -- --e2e "hello world"   # contract probe: one JSON object, no training
 ```
 
-For a fast, machine-readable smoke check that does not train the model or enter
-interactive mode:
+The default path pre-trains on 16 foundational statements, instruction-tunes on
+28 QA pairs, prints a sample prediction, and accepts prompts until `exit`.
+Because this is a small educational model, generated text is an observation of
+the mechanics, not a quality benchmark.
 
-```bash
-cargo run -- --e2e "hello world"
+## Commands
+
+| Command | What it does |
+|---|---|
+| `cargo run` | Build vocab, pre-train + instruction-tune, chat interactively |
+| `cargo run -- --e2e "..."` | Initialize model, generate once, print one JSON object (`status`, `output`, `total_parameters`) |
+| `cargo fmt --check` | Format gate |
+| `cargo clippy --workspace --all-features --all-targets -- -D warnings` | Lint gate |
+| `cargo test --all-targets` | Unit, property/invariant, integration, and contract tests |
+| `cargo build --release` | Release binary (also produced by the release workflow) |
+
+E2E JSON contract:
+
+```json
+{"output":"...","prompt":"hello world","status":"ok","total_parameters":380893}
 ```
 
-## Explore the Project
+## Layout
 
-- [Architecture](docs/architecture.md) maps the model pipeline and source tree.
-- [Running and development](docs/running-and-development.md) covers the CLI and
-  local commands.
-- [Model and training](docs/model-and-training.md) records the current model
-  configuration and training phases.
-- [Dataset curation](docs/dataset-curation.md) defines the compact water-cycle
-  teaching set, budgets, held-out prompts, and E2E inference boundary.
-- [Testing](docs/testing.md) explains the unit, mutation-resistant, integration,
-  and black-box evaluation boundaries.
-- [Learning directions](docs/learning-directions.md) collects possible
-  experiments without turning them into product promises.
+Each domain keeps a facade (`mod.rs`), its types and traits (`interfaces.rs`),
+and its implementation (`logic.rs`) — one pattern to learn, then every module
+reads the same way.
 
-Start with [`src/main.rs`](src/main.rs) for high-level orchestration, then enter
-the [`application`](src/application/mod.rs) facade for executable behavior and
-the [`llm`](src/llm/mod.rs) facade for the model API. Forward passes, backward
-passes, training, and generation live in
-[`src/llm/logic.rs`](src/llm/logic.rs).
+```text
+src/
+├── main.rs               Parse, load, build, and run
+├── lib.rs                Domain declarations and compatibility re-exports
+├── cli/                   CLI mode and argument behavior
+├── application/           Dataset, model, training, and interaction orchestration
+├── configuration/         Shared model constants
+├── llm/                   Model API, composition, training, and generation
+├── transformer/           Transformer block composition
+├── self_attention/        Self-attention operation and private gradient test
+├── feed_forward/          Position-wise feed-forward operation and optimizers
+├── embeddings/            Token and positional embeddings
+├── output_projection/     Vocabulary projection
+├── layer_norm/            Layer normalization
+├── vocab/                 Vocabulary and tokenization
+├── dataset_loader/        JSON and CSV dataset loading
+└── adam/                  Adam optimizer
+tests/                     Integration, contract, and public-API checks
+data/                      The compact water-cycle micro-domain
+```
 
-## Contributing
+Correctness is separated by layer: unit tests validate operations,
+mutation-resistant tests check optimizer invariants, integration tests
+exercise layers together, and the companion
+[rustgpt-evals](https://github.com/BA-CalderonMorales/rustgpt-evals) project
+observes the compiled CLI as a black box.
 
-Focused contributions that improve understanding are welcome. Read the
-[contribution guide](CONTRIBUTING.md) and follow the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+## Docs
+
+| Document | What |
+|---|---|
+| [Architecture](docs/architecture.md) | Model pipeline, source map, reading order |
+| [Model and training](docs/model-and-training.md) | Current configuration and training phases |
+| [Dataset curation](docs/dataset-curation.md) | Water-cycle micro-domain, budgets, held-out prompts |
+| [Testing](docs/testing.md) | What each correctness boundary establishes |
+| [Running and development](docs/running-and-development.md) | CLI surface and local commands |
+| [Learning directions](docs/learning-directions.md) | The experiment backlog — no product promises |
 
 ## License
 
-This fork remains available under the original [MIT License](LICENSE.txt). The
-copyright and license notice from Thomas Karatzas are preserved unchanged.
+MIT — see [LICENSE.txt](LICENSE.txt).
 
 ## Attribution
 
-This repository is a learning fork of
-[tekaratzas/RustGPT](https://github.com/tekaratzas/RustGPT), created by
-[Thomas Karatzas](https://github.com/tekaratzas). The upstream project is the
-source of the original implementation; changes here focus on my learning
-journey.
+RustGPT began as
+[tekaratzas/RustGPT](https://github.com/tekaratzas/RustGPT), a gentle
+introduction to building a transformer from scratch, created by
+[Thomas Karatzas](https://github.com/tekaratzas). This repository is a
+learning fork: the original implementation and the spirit of the project —
+understand a language model by building one — belong to him. The original
+copyright and license notice in [LICENSE.txt](LICENSE.txt) are preserved
+unchanged; changes here focus on journey, not replacement.
