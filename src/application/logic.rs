@@ -37,6 +37,7 @@ pub(crate) fn build_llm(
     model_path: Option<&str>,
     train_path: Option<&str>,
     tiny: bool,
+    can_initialize: bool,
 ) -> LLM {
     if let Some(path) = model_path {
         if std::path::Path::new(path).exists() {
@@ -46,9 +47,10 @@ pub(crate) fn build_llm(
                 std::process::exit(1);
             });
         }
-        // A missing checkpoint is only acceptable as a first-run target for
-        // --train; any other mode must not silently fall back to a fresh model.
-        if train_path.is_none() {
+        // A missing checkpoint is a first-run target only for modes that
+        // train and save (--train, interactive); --eval and --e2e must not
+        // silently fall back to a fresh model.
+        if train_path.is_none() && !can_initialize {
             eprintln!("error: checkpoint not found: {path}");
             std::process::exit(1);
         }

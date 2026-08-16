@@ -14,6 +14,10 @@ fn main() {
         invocation.model.as_deref(),
         train_path,
         invocation.tiny,
+        matches!(
+            invocation.mode,
+            cli::Mode::Train { .. } | cli::Mode::Interactive
+        ),
     );
     application::run(invocation, &dataset, &mut model);
 }
