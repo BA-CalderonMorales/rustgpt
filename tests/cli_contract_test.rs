@@ -19,7 +19,7 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]\n",
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
@@ -28,6 +28,7 @@ fn help_flags_print_the_same_contract_without_loading_data() {
         "  llm --eval --seed 42\n",
         "  llm --model models/mine.bin --eval --seed 42\n",
         "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin\n",
+        "  llm --tiny --eval --model models/ts.bin --fluency 20\n",
         "  llm --probe --model models/mine.bin --seed 42\n",
     );
 
@@ -242,6 +243,33 @@ fn temperature_requires_tiny_eval() {
         (
             vec!["--temperature", "abc"],
             "error: invalid temperature: abc\nTry 'llm --help' for usage.\n",
+        ),
+    ] {
+        let output = run(&arguments, &std::env::temp_dir());
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(stderr(&output), message);
+    }
+}
+
+#[test]
+fn fluency_requires_tiny_eval() {
+    for (arguments, message) in [
+        (
+            vec!["--fluency", "20"],
+            "error: --fluency requires --tiny --eval\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--train", "x.jsonl", "--fluency", "20"],
+            "error: --fluency requires --tiny --eval\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--eval", "--fluency", "0"],
+            "error: --fluency needs at least one sample\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--eval", "--fluency", "abc"],
+            "error: invalid fluency sample count: abc\nTry 'llm --help' for usage.\n",
         ),
     ] {
         let output = run(&arguments, &std::env::temp_dir());

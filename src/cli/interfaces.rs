@@ -14,4 +14,6 @@ pub(crate) struct Invocation {
     pub tiny: bool,
     pub trace: bool,
     pub temperature: f32,
+    /// Number of seeded fluency samples for the tiny-lane eval yardstick.
+    pub fluency: Option<usize>,
 }

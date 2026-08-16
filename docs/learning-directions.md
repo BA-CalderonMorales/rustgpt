@@ -193,6 +193,21 @@ small enough to explain, test, and reverse.
   foreshadow. The successor quantity is the free-running profile (logit
   stats collected during the gate's 96-token sample itself -- the regime
   where repetition actually happens); ready when a lever verdict needs it.
+- **The fluency yardstick, landed with its calibration floor (2026-08-16,
+  W3, seed 42).** `--tiny --eval --fluency <n>` adds a `fluency` block
+  (additive key; the greedy leg and the plain eval contract are
+  unchanged): distinct-1, distinct-2, repetition-free rate,
+  completion_sentences, and mean completion length over n seeded
+  96-token completions of "Once upon a time,". Calibration batch on
+  models/tinystories/ts-13m-s42.bin (n=20): distinct-1 0.0081,
+  distinct-2 0.0082, repetition-free 0.0, completion length 123, every
+  token "." (the gate's 96-token window hides that the collapse emits
+  123 periods). The calibrated pass floor for decode levers:
+  repetition-free rate >= 0.5 AND distinct-1 >= 0.1 (an order of
+  magnitude above the collapsed floor). completion_sentences is NOT
+  discriminative at the collapsed extreme (every "." counts), so the
+  multi-sentence judgment stays a short manual rubric on top of the
+  automated distinct-n.
 - **Training budget at the recipe level, falsified (2026-08-16, seed 42).**
   Claim: "more epochs on the 300-story demo slice breaks the collapse
   gate." Table (--tiny --train models/tinystories/demo.jsonl --seed 42,

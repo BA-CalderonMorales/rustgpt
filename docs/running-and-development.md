@@ -108,6 +108,20 @@ every T; the knob exists so the collapse gate can be measured under a
 peaked softmax and gives the probability-weighted sampling probe its
 baseline (see docs/learning-directions.md, W3 verdict).
 
+### The fluency yardstick
+
+```bash
+cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin --fluency 20
+```
+
+`--fluency <n>` (default off, `--tiny --eval` only, exit 2 otherwise) adds
+a `fluency` block to the eval JSON: distinct-1, distinct-2,
+repetition-free rate, sentence-final punctuation count, and mean length
+over `n` seeded completions of the gate's starter. This is the decode-
+quality yardstick behind the collapse gate -- repetition-free is necessary
+but not sufficient, and distinct-n measures lexical diversity (see
+docs/learning-directions.md, W3 verdict for the calibrated pass floor).
+
 ## Development Commands
 
 ```bash

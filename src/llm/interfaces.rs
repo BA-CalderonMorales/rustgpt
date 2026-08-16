@@ -61,3 +61,20 @@ pub struct LogitProfile {
     /// Mean softmax output entropy over the vocabulary.
     pub entropy: f32,
 }
+
+/// The decode-quality yardstick over N generated samples. Repetition-free
+/// is necessary but not sufficient (a model can emit non-repeating
+/// gibberish); distinct-n measures lexical diversity and the completion
+/// probe counts sentence-final punctuation as the multi-sentence signal.
+pub struct FluencyScore {
+    /// Mean unique-token ratio per sample: distinct-1.
+    pub distinct_1: f32,
+    /// Mean unique-bigram ratio per sample: distinct-2.
+    pub distinct_2: f32,
+    /// Fraction of samples with no adjacent identical pair.
+    pub repetition_free_rate: f32,
+    /// Mean count of sentence-final punctuation tokens per sample.
+    pub completion_sentences: f32,
+    /// Mean non-</s> token count per sample.
+    pub mean_completion_len: f32,
+}

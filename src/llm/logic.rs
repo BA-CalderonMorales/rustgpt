@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 
 use ndarray::{Array1, Array2, Axis};
 
-use super::{AnswerScore, DecodeStep, LLM, Layer, LogitProfile};
+use super::{AnswerScore, DecodeStep, FluencyScore, LLM, Layer, LogitProfile};
 
 /// Literal answer for prompts whose tokens are all outside the vocabulary.
 /// The CLI contract pins this string: out-of-vocabulary input must never
@@ -823,6 +823,65 @@ impl LLM {
         if norm > max_norm {
             let scale = max_norm / norm;
             grads.mapv_inplace(|x| x * scale);
+        }
+    }
+
+    /// The decode-quality yardstick over a batch of generated samples:
+    /// per-sample distinct-1, distinct-2, repetition-freeness, sentence-
+    /// final punctuation count, and length, averaged across the batch.
+    /// This -- not the boolean gate -- is the verdict instrument for
+    /// decode levers.
+    pub fn fluency_score(&self, samples: &[String]) -> FluencyScore {
+        // Per-sample accumulators over the batch.
+        let mut distinct_1_sum = 0.0f64;
+        let mut distinct_2_sum = 0.0f64;
+        let mut repetition_free_count = 0usize;
+        let mut sentences_sum = 0.0f64;
+        let mut length_sum = 0.0f64;
+
+        // Tokenize each sample, stripping the trailing </s>.
+        for sample in samples {
+            let mut tokens = self.tokenize(sample);
+            if tokens.last() == self.vocab.encode("</s>").as_ref() {
+                tokens.pop();
+            }
+            if tokens.is_empty() {
+                continue;
+            }
+
+            // Distinct-1 over the sample's tokens, distinct-2 over its pairs.
+            let mut unique_tokens = std::collections::HashSet::new();
+            let mut unique_pairs = std::collections::HashSet::new();
+            for (index, token) in tokens.iter().enumerate() {
+                unique_tokens.insert(token);
+                if index > 0 {
+                    unique_pairs.insert((tokens[index - 1], *token));
+                }
+            }
+            distinct_1_sum += unique_tokens.len() as f64 / tokens.len() as f64;
+            distinct_2_sum +=
+                unique_pairs.len() as f64 / tokens.len().saturating_sub(1).max(1) as f64;
+
+            // Repetition-free means no adjacent identical pair; sentence-final
+            // punctuation marks the multi-sentence signal.
+            let has_repeat = tokens.windows(2).any(|window| window[0] == window[1]);
+            repetition_free_count += usize::from(!has_repeat);
+            let sentences = tokens
+                .iter()
+                .filter(|token| matches!(self.vocab.decode[*token].as_str(), "." | "!" | "?"))
+                .count();
+            sentences_sum += sentences as f64;
+            length_sum += tokens.len() as f64;
+        }
+
+        // Means over the batch; an empty batch yields zeroes.
+        let batch = samples.len().max(1) as f64;
+        FluencyScore {
+            distinct_1: (distinct_1_sum / batch) as f32,
+            distinct_2: (distinct_2_sum / batch) as f32,
+            repetition_free_rate: repetition_free_count as f32 / batch as f32,
+            completion_sentences: (sentences_sum / batch) as f32,
+            mean_completion_len: (length_sum / batch) as f32,
         }
     }
 }

@@ -7,7 +7,7 @@ const DEFAULT_TEMPERATURE: f32 = 1.0;
 fn usage() {
     // The one-line contract: flags first, then exactly one mode.
     println!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]"
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]"
     );
     println!();
 
@@ -21,6 +21,7 @@ fn usage() {
     println!(
         "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin"
     );
+    println!("  llm --tiny --eval --model models/ts.bin --fluency 20");
     println!("  llm --probe --model models/mine.bin --seed 42");
 }
 
@@ -35,6 +36,7 @@ fn try_parse() -> Result<Invocation, String> {
     let mut tiny = false;
     let mut trace = false;
     let mut temperature = DEFAULT_TEMPERATURE;
+    let mut fluency: Option<usize> = None;
 
     // Consume every argument in order.
     while index < args.len() {
@@ -93,6 +95,17 @@ fn try_parse() -> Result<Invocation, String> {
                 temperature = value
                     .parse()
                     .map_err(|_| format!("invalid temperature: {value}"))?;
+            }
+            "--fluency" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--fluency requires a value".to_string())?;
+                index += 1;
+                fluency = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("invalid fluency sample count: {value}"))?,
+                );
             }
             "--e2e" => {
                 if mode.is_some() {
@@ -153,6 +166,14 @@ fn try_parse() -> Result<Invocation, String> {
         return Err("--temperature must be positive".to_string());
     }
 
+    // The fluency yardstick belongs to the tiny-lane eval formula alone.
+    if fluency.is_some() && !(tiny && matches!(mode, Mode::Eval)) {
+        return Err("--fluency requires --tiny --eval".to_string());
+    }
+    if fluency == Some(0) {
+        return Err("--fluency needs at least one sample".to_string());
+    }
+
     // Resolve the seed: machine modes default to 42, interactive draws
     // a random seed unless one was given.
     let seed = seed.unwrap_or(match mode {
@@ -169,6 +190,7 @@ fn try_parse() -> Result<Invocation, String> {
         tiny,
         trace,
         temperature,
+        fluency,
     })
 }
 
