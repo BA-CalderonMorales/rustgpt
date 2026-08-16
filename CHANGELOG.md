@@ -5,6 +5,82 @@ produced: score, trajectory, and artifacts. The top section becomes the
 GitHub release body (see `.github/workflows/release.yml`), so the public
 record and the repo history are the same document.
 
+## [0.0.6] - 2026-08-16
+
+The observability release: make the pipeline traceable first, spend the
+freed credibility on the collapse gate, and state the free-compute truth.
+No new score to celebrate -- instead, three honest falsifications that
+triangulate the frontier, plus the instrument that points at the code.
+
+Observability (W1): `--trace` turns the interactive lane into a
+domain-labeled event stream on stderr -- `[cli]`, `[configuration]`,
+`[dataset]`, `[checkpoint]`, `[llm]`, `[vocab]`, `[decode]` -- where the
+label IS the file to open when output misbehaves. Every generated token
+prints its domain, its string, and its softmax probability via the new
+`DecodeStep` capture (`predict_with_steps`), so the greeting-attractor
+story on "water?" is visible as `"Hello" p=0.9992` followed by the
+water-cycle chain reasserting at `p=0.6822`. Greedy output is
+byte-identical: the shared empty-output fallback now has one authoritative
+home (`answer_string`), and main.rs is the two-view dispatcher
+(`run_interactive` / `run_headless`). `--trace` with any machine mode
+errors out (exit 2); machine JSON contracts are untouched.
+
+Artifacts (W2): the README now inventories every `models/*.bin` -- size,
+recipe, what it demonstrates, how to regenerate -- including the honest
+verdict that `watercycle-0.0.3.bin` is pre-format-v2 ("not a rustgpt
+checkpoint") and kept for format archaeology only. Every artifact is
+regenerable evidence, gitignored, reproduced from its seed.
+
+The collapse attack (W3), verdict: falsified, and the falsification is the
+finding. Temperature-scaled greedy decode (logits / T before the output
+softmax) at T in {0.7, 0.8, 0.9, 1.0, 1.1, 1.2} holds the tiny lane's
+collapse-gate repetition rate at 1.0 -- mathematically pinned, because
+softmax argmax is invariant to positive logit scaling, and test-verified.
+A new probe then attacked the "undertrained" hypothesis: 3 / 6 / 12 epochs
+on the 300-story demo slice (constant LR 5e-4) moves the attractor from
+"." to "the" but never below the gate (0.9684 / 1.0 / 1.0), and the recipe
+goes unstable at 12 epochs (loss 5.23 -> 5.37). Three hypotheses are now
+falsified with evidence: data volume, decode sharpness, epoch count at
+this recipe. The gate is a moving frequency-head attractor; teacher-forced
+CE (5.7-7.1, coverage 1.0) is blind to it. Untested levers, ranked by the
+advisory: LR decay, probability-weighted sampling and a repetition
+penalty, label smoothing, and a continuous logit profile (top-1 margin /
+output entropy) as the instrument the boolean gate cannot be.
+
+Free compute (W4): Colab/Kaggle quotas verified by webfetch (Colab: GPU
+"heavily restricted", ~12h sessions, dynamic limits; Kaggle: ~30 GPU
+h/week, T4/P100, wall-clock quota). The honest verdict: this stack has no
+CUDA path, so free GPUs are useless today and free CPUs ~= this laptop;
+the cloud buys offload and reproducibility, not speed. `scripts/cloud-train.sh`
+and `docs/free-compute.md` ship the lane. BLAS (W5) was attempted and
+blocked by the environment (no gfortran; system OpenBLAS needs interactive
+sudo); Cargo.toml default features untouched, and the cloud path is the
+documented first move for the next attempt.
+
+Score (water-cycle held-out, seed 42): exact 4/4, prefix 4/4, mean 1.0,
+trajectory [5.67, 1.53, 1.52, 1.55, 1.68] -- unchanged by design; this
+release changes surfaces, not weights. Tiny-lane pin (ts-13m-s42.bin):
+CE p10/p50/p90 = 5.49/5.87/6.31, coverage 0.9976, collapse gate 1.0 -- the
+number this release names, measures, and hands to the next.
+
+Perspective (three oracles, quoted; perception evidence, never merged
+into score numbers): codex cold-viewer -- "the strongest artifact is the
+seeded micro-eval plus trace... small and likely overfit, but reproducible,
+inspectable evidence tied to an objective, not a cherry-picked chat
+transcript"; weakest is "the tiny lane: CE around 5-6 and repetition rate
+1.0 indicate a model or training/evaluation failure, not merely a decoding
+preference". codex ML-scientist advisory -- "temperature is falsified as
+the cause... one epoch at ~1.5M tokens for a 14M model is still a very
+undertrained regime; the collapse may be an optimization/data-budget
+failure rather than an architectural failure"; the honest next run is "one
+properly controlled longer-training/LR-decay baseline and one
+probability-weighted sampling diagnostic". DeepSeek V4 Pro 0813
+(headless opencode) -- "your own data already proves two things people
+usually take three months to learn: CE and collapse are decoupled, and
+temperature can't rescue greedy"; the repo's value proposition: "the
+collapse is not a bug to paper over -- it's the best teaching artifact you
+have. Make the collapse the pin, not the problem."
+
 ## [0.0.5] - 2026-08-16
 
 The no-framework rig stops apologizing: contracts first, then three

@@ -4,7 +4,7 @@
 
 **A from-scratch transformer language model in pure Rust — inspectable mechanics, no external ML framework (fork - see [Attribution](https://github.com/BA-CalderonMorales/rustgpt#attribution))**
 
-[![Crate](https://img.shields.io/badge/version-0.0.5-blue.svg?logo=rust&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt)
+[![Crate](https://img.shields.io/badge/version-0.0.6-blue.svg?logo=rust&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Check](https://img.shields.io/github/actions/workflow/status/BA-CalderonMorales/rustgpt/check.yml?label=check&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/actions/workflows/check.yml)
 [![Test](https://img.shields.io/github/actions/workflow/status/BA-CalderonMorales/rustgpt/test.yml?label=test&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/actions/workflows/test.yml)
@@ -44,6 +44,29 @@ bar), and then chats until `exit`. Use `--seed 42` there too for a
 reproducible session. Because this is a small educational model, generated
 text is an observation of the mechanics -- measured, seeded, and pinned by
 the contract tests, not a quality benchmark.
+
+## Artifacts
+
+Every `models/*.bin` is regenerable evidence, gitignored: its recipe, its
+seed, and its eval JSON reproduce the same artifact. Treat the table as an
+inventory of the exploration so far, not a product catalog.
+
+| Artifact | Size | Recipe / experiment | What it demonstrates | Regenerate |
+|---|---|---|---|---|
+| `watercycle-latest.bin` | 1.5 MB | v0.0.5 eval recipe (seed 42, replay + min-CE promotion), E10 lineage | The release winner: greets and hedges; held-out 4/4 exact, mean 1.0 | `rm models/watercycle-latest.bin && target/release/llm --eval --seed 42 --model models/watercycle-latest.bin` |
+| `watercycle-e10.bin` | 1.5 MB | E10 social-register era | Social register landed: "hi!" -> "Assistant : Hello !" | same recipe as latest (superseded by it) |
+| `watercycle-e8.bin` | 1.5 MB | E8 hedge-stabilization era | Stable hedging across probe prompts | same-era recipe (superseded) |
+| `watercycle-e7.bin` | 1.5 MB | E7 hedge era | "How do mountains form?" -> full hedge; OOV prompts never confidently hallucinate | same-era recipe (superseded) |
+| `watercycle-e6.bin` | 1.5 MB | E6 targeted paraphrase expansion | Chain statements and paraphrase pairs: exact 2/4, mean 0.6534 era | same-era recipe (superseded) |
+| `watercycle-e2.bin`, `watercycle-e1.bin` | 1.5 MB | Early recipe era | Water-cycle Q/A recital; no social register yet | same-era recipe (superseded) |
+| `watercycle-0.0.3.bin` | 1.5 MB | v0.0.3 era, checkpoint format v1 | Legacy: no longer loads in the current CLI ("not a rustgpt checkpoint"); kept for format archaeology | not regenerable in this format |
+| `tinystories/ts-13m-s42.bin` | 57 MB | 1 epoch over 40k TinyStories stories (seed 42, 1.5M tokens) | The laptop lane at full-corpus scale; collapse gate at repetition 1.0 -- the current frontier | `python scripts/slice_tinystories.py && target/release/llm --tiny --train models/tinystories/train.jsonl --epochs 1 --seed 42 --model models/tinystories/ts-13m-s42.bin` (~1.5 h on a 14-thread laptop) |
+| `tinystories/demo.bin` | 29 MB | 1 epoch over the 300-story demo slice | The demo lane: cleaner data, same collapse gate (7.3M params) | `python scripts/demo/make_demo_slice.py && target/release/llm --tiny --train models/tinystories/demo.jsonl --epochs 1 --seed 42 --model models/tinystories/demo.bin` |
+
+`models/tinystories/train.jsonl` (40k stories) and
+`models/tinystories/heldout.jsonl` (256, split seed 20260816) are rebuilt
+by `scripts/slice_tinystories.py`; the held-out slice never touches a
+training slice.
 
 ## Commands
 
