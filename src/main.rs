@@ -16,7 +16,7 @@ fn main() {
         invocation.tiny,
         matches!(
             invocation.mode,
-            cli::Mode::Train { .. } | cli::Mode::Interactive
+            cli::Mode::Train { .. } | cli::Mode::Interactive | cli::Mode::Eval
         ),
     );
     application::run(invocation, &dataset, &mut model);

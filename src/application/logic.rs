@@ -48,8 +48,9 @@ pub(crate) fn build_llm(
             });
         }
         // A missing checkpoint is a first-run target only for modes that
-        // train and save (--train, interactive); --eval and --e2e must not
-        // silently fall back to a fresh model.
+        // train (--train, interactive, --eval, which always builds fresh
+        // when no checkpoint is given); --e2e must not silently fall back
+        // to a fresh model.
         if train_path.is_none() && !can_initialize {
             eprintln!("error: checkpoint not found: {path}");
             std::process::exit(1);
@@ -242,10 +243,44 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM, model_path: Option<&s
 
     eprintln!("=== INSTRUCTION TUNING ===");
     let mut tuning_loss = Vec::new();
+    let mut best_ce = f32::INFINITY;
+    let mut best_snapshot: Option<Vec<(String, Vec<u8>)>> = None;
     let part_epochs = TUNING_EPOCHS / TUNING_CE_SAMPLES;
     for _ in 0..TUNING_CE_SAMPLES {
         tuning_loss.extend(train_tuning_part(dataset, llm, part_epochs, true));
-        trajectory_ce.push(mean_heldout_ce(llm, &chat_sequences));
+        let ce = mean_heldout_ce(llm, &chat_sequences);
+        trajectory_ce.push(ce);
+        if ce < best_ce {
+            best_ce = ce;
+            best_snapshot = Some(
+                llm.network
+                    .iter()
+                    .map(|layer| {
+                        (
+                            layer.layer_type().to_string(),
+                            layer.parameter_bytes().unwrap_or_else(|error| {
+                                panic!("failed to snapshot layer state: {error}")
+                            }),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+    }
+
+    // Promote the min-CE tuning state into the artifact: the eval items and
+    // the saved checkpoint must describe the same model (the checkpoint plus
+    // its eval JSON is the unit of evidence), not the drifted tail.
+    if let Some(snapshot) = &best_snapshot {
+        for (layer, (expected_type, payload)) in llm.network.iter_mut().zip(snapshot) {
+            if layer.layer_type() != expected_type {
+                panic!("snapshot layer type mismatch");
+            }
+            layer.load_parameter_bytes(payload).unwrap_or_else(|error| {
+                panic!("failed to restore min-CE state: {error}")
+            });
+        }
+        eprintln!("Promoting min-CE state (held-out CE {best_ce:.4}) into the artifact");
     }
 
     save_checkpoint(llm, model_path);

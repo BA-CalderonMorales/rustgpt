@@ -41,7 +41,12 @@ small enough to explain, test, and reverse.
 - **Save the checkpoint at min held-out CE.** `--eval` already samples the
   tuning trajectory (`TUNING_CE_SAMPLES`); promote the min-CE sample into
   the saved artifact so the drift tail (2.17) cannot ship over the 1.95
-  point. One change, no recipe change.
+  point. One change, no recipe change. Verdict (2026-08-16, seed 42, same
+  recipe): landed. Saved artifact carries the 1.9508 state; held-out CE
+  1.95 <= 2.11 by construction; eval 1/4, 1/4, mean 0.3482 >= baseline
+  (0.3125); item 3's repetition loop broken at min-CE (property P3 0.94 ->
+  0.96). Item 4 still loops at the min-CE point -- decode-time compute is
+  the next lever for the residual attractor.
 - **OOV prompts return empty output.** `"hello"` produces `""` with
   `status:ok` because the vocabulary lacks the word and decode stops at the
   first token. Add a fallback or an explicit report line before the micro
