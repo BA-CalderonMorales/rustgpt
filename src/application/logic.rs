@@ -316,7 +316,7 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM, model_path: Option<&s
     for (prompt_text, reference) in &heldout {
         let prompt = format!("User: {prompt_text}");
         let generated = llm.predict(&prompt);
-        let score = llm.answer_score(&prompt, reference);
+        let score = llm.score_generated(&generated, reference);
         exact_total += usize::from(score.exact);
         prefix_total += usize::from(score.prefix);
         accuracies.push(score.accuracy);

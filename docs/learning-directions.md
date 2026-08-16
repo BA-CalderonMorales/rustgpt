@@ -107,3 +107,13 @@ small enough to explain, test, and reverse.
 - Measure before changing implementation details.
 - Explore parallelism, allocation behavior, or SIMD as isolated experiments.
 - Record the readability cost of each optimization alongside its benchmark.
+- **Batched training, falsified at the roofline (2026-08-16).** ndarray's
+  non-BLAS `dot` scales linearly with total rows, so stacking padded
+  sequences buys only allocation/dispatch overhead: batch-4/8 matmuls run
+  at ~1.4x the per-sequence cost (918us/1875us vs 4x/8x 322us) and the
+  attention dot amortizes 0x (128x512 batch = 427us vs 108us single).
+  The 3-5x tokens/s claim is unreachable on this laptop without BLAS, and
+  the masked-batch rewrite would add all-`-inf` softmax NaN traps plus
+  Adam-semantics ambiguity for <2x. The micro-grid bet (arXiv 2602.07488)
+  is a day on this machine, not a week. Batch only if the roofline moves
+  (BLAS-backed ndarray or a racecar ADR).

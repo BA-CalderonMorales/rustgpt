@@ -315,13 +315,6 @@ impl LLM {
                 for layer in self.network.iter_mut().rev() {
                     grads_output = layer.backward(&grads_output, lr);
                 }
-
-                let tokens = Self::greedy_decode(&probs);
-                let next_token = tokens[tokens.len() - 1];
-
-                if next_token == self.vocab.encode("</s>").unwrap() {
-                    continue;
-                }
             }
 
             let epoch_loss = total_loss / tokenized_data.len() as f32;
