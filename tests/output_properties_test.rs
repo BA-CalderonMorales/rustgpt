@@ -8,7 +8,7 @@
 
 use std::path::Path;
 
-use llm::{Dataset, DatasetType, LLM, Vocab, Xorshift};
+use llm::{LLM, Vocab, Xorshift};
 
 const SUITE_SEED: u64 = 20260816;
 const DRAWS: usize = 50;
@@ -35,38 +35,85 @@ fn load_model(path: &str) -> LLM {
     llm::load(path).unwrap_or_else(|error| panic!("failed to load artifact {path}: {error}"))
 }
 
+// Frozen prompt pool: the v0.0.4-era 28 chat questions plus the 4 held-out
+// prompts, embedded so the draw distribution can never drift with the
+// corpus. Pass-table deltas across artifacts are comparable by
+// construction; only the artifact under test changes.
+const POOL_QUESTIONS: &[&str] = &[
+    "What is evaporation?",
+    "What does evaporation change?",
+    "How does warm water change into vapor?",
+    "What happens after sunlight warms water?",
+    "What is condensation?",
+    "What does cooling do to water vapor?",
+    "How does water vapor become droplets?",
+    "What change forms droplets from water vapor?",
+    "What forms clouds?",
+    "How do small droplets form clouds?",
+    "What happens when water droplets join?",
+    "Where do water droplets join?",
+    "What causes rain?",
+    "Why does rain fall from clouds?",
+    "What happens when droplets become heavy?",
+    "How does precipitation fall?",
+    "Where does rainwater flow?",
+    "What happens to rainwater on the ground?",
+    "Where does rainwater collect?",
+    "How does rainwater reach rivers and lakes?",
+    "Where do rivers carry water?",
+    "How does water reach the ocean?",
+    "What happens after water collects in rivers?",
+    "What carries water to the ocean?",
+    "What happens after water reaches the ocean?",
+    "Why does the water cycle repeat?",
+    "What keeps the water cycle moving?",
+    "How does the water cycle continue?",
+    "Why do heavy droplets fall from clouds?",
+    "How does cooling change water vapor?",
+    "Where does rainwater collect after rainwater flows downhill?",
+    "What happens after rivers carry water to the ocean?",
+];
+
+const POOL_ANSWERS: &[&str] = &[
+    "Evaporation changes warm water into water vapor.",
+    "Evaporation changes warm water into water vapor.",
+    "Evaporation changes warm water into water vapor.",
+    "Evaporation changes warm water into water vapor.",
+    "Condensation changes water vapor into droplets.",
+    "Condensation changes water vapor into droplets.",
+    "Condensation changes water vapor into droplets.",
+    "Condensation changes water vapor into droplets.",
+    "Small water droplets join and form clouds.",
+    "Small water droplets join and form clouds.",
+    "Small water droplets join and form clouds.",
+    "Small water droplets join and form clouds.",
+    "Heavy water droplets fall from clouds as rain.",
+    "Heavy water droplets fall from clouds as rain.",
+    "Heavy water droplets fall from clouds as rain.",
+    "Heavy water droplets fall from clouds as rain.",
+    "Rainwater flows downhill and collects in rivers and lakes.",
+    "Rainwater flows downhill and collects in rivers and lakes.",
+    "Rainwater flows downhill and collects in rivers and lakes.",
+    "Rainwater flows downhill and collects in rivers and lakes.",
+    "Rivers carry water to the ocean.",
+    "Rivers carry water to the ocean.",
+    "Rivers carry water to the ocean.",
+    "Rivers carry water to the ocean.",
+    "The water cycle repeats after water reaches the ocean.",
+    "The water cycle repeats after water reaches the ocean.",
+    "Sunlight keeps the water cycle moving.",
+    "Sunlight keeps the water cycle moving.",
+    "Heavy water droplets fall from clouds as rain.",
+    "Condensation changes water vapor into droplets.",
+    "Rainwater flows downhill and collects in rivers and lakes.",
+    "The water cycle repeats after water reaches the ocean.",
+];
+
 fn parse_qa_pairs() -> (Vec<String>, Vec<String>) {
-    let dataset = Dataset::new(
-        String::from("data/pretraining_data.json"),
-        String::from("data/chat_training_data.json"),
-        DatasetType::JSON,
-    );
-    let mut questions = Vec::new();
-    let mut answers = Vec::new();
-    for example in &dataset.chat_training_data {
-        if let Some((question, answer)) = example.split_once(" Assistant: ") {
-            questions.push(
-                question
-                    .strip_prefix("User: ")
-                    .unwrap_or(question)
-                    .to_string(),
-            );
-            answers.push(
-                answer
-                    .strip_suffix(" </s>")
-                    .unwrap_or(answer)
-                    .trim_end_matches('.')
-                    .to_string(),
-            );
-        }
-    }
-    let heldout_text = std::fs::read_to_string("data/heldout.json").expect("heldout.json");
-    let heldout: Vec<(String, String)> = serde_json::from_str(&heldout_text).expect("pairs");
-    for (question, answer) in heldout {
-        questions.push(question);
-        answers.push(answer);
-    }
-    (questions, answers)
+    (
+        POOL_QUESTIONS.iter().map(|q| (*q).to_string()).collect(),
+        POOL_ANSWERS.iter().map(|a| (*a).to_string()).collect(),
+    )
 }
 
 struct PromptGen {

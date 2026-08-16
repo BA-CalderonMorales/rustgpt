@@ -21,13 +21,13 @@ Enter
 Sleep 3s
 # 1. the version contract: 0.0.5, derived from Cargo.toml, pinned by tests
 
-Type "./target/release/llm --model models/watercycle-latest.bin --e2e 'hello'"
+Type "./target/release/llm --model models/watercycle-latest.bin --e2e 'zzzzzz'"
 Enter
 Sleep 4s
 # 2. the OOV contract: an unknown word gets an explicit answer, never a
 #    silent empty output with status:ok
 
-Type "./target/release/llm --eval --seed 42 2>&1 | python3 -m json.tool | head -70"
+Type "./target/release/llm --eval --seed 42 | python3 -m json.tool | head -70"
 Enter
 Sleep 12s
 # 3. the micro arena truth table: train both phases from seed 42, score the

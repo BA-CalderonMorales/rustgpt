@@ -44,6 +44,9 @@ impl Vocab {
     pub fn process_text_for_vocab(texts: &[String], vocab_set: &mut HashSet<String>) {
         // Add end of sequence token
         vocab_set.insert("</s>".to_string());
+        // Add the unknown-word token so the model can see what it does not
+        // know instead of silently dropping it.
+        vocab_set.insert("<unk>".to_string());
 
         // Process all training examples for vocabulary
         for text in texts {

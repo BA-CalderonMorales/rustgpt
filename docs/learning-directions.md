@@ -26,6 +26,27 @@ small enough to explain, test, and reverse.
 - Compare optimizers and learning-rate schedules.
 - Explore regularization and gradient behavior.
 - Improve tokenization or dataset streaming without hiding the mechanics.
+- **Targeted paraphrase expansion within budget.** Verdict (2026-08-16,
+  E6): the v0.0.4 corpus had no chained structure ("rain falls -> flows
+  downhill -> collects", "rivers reach the ocean -> cycle repeats"), which
+  held-out items 3 and 4 test. Five chain statements plus 25 targeted
+  paraphrase pairs (budgets: 21/25 examples, 144/192 pretrain tokens,
+  828/1029 chat tokens, vocab 87/120) moved exact 1/4 -> 2/4, mean 0.4375
+  -> 0.6534, CE floor 1.91 -> 1.24. Items 1 and 4 remain wrong-but-fluent
+  attractors (clouds family, rain family) -- the next frontier is
+  breaking cue competition ("heavy droplets" vs "droplets + clouds"
+  co-occurrence), not more paraphrase volume.
+- **Social register, landed (2026-08-16, E10).** Five greeting pairs
+  ("hi!", "hello", "hey!", "hi there", "good morning" -> "Hello!")
+  swapped into the fixed 59-pair chat budget moved the seed-42 held-out
+  score to a perfect 4/4 (mean 1.0) and generalized greetings to unseen
+  forms; the conversation suite (E9, 20 predeclared probes) reports 16/17
+  out-of-domain prompts answered with a hedge or greeting. Residuals,
+  measured: one truncated hedge, one stuttered hedge, a greeting
+  attractor on single-word in-vocabulary prompts ("Water?" -> "Hello!"),
+  and a greeting stutter on bare prompts without the "User:" prefix. The
+  min-CE promoted state can lag the hedge/greeting behavior of the tail;
+  check both when a surface behavior regresses.
 
 ## Continual and Test-Time Learning
 
@@ -50,7 +71,15 @@ small enough to explain, test, and reverse.
 - **OOV prompts return empty output.** `"hello"` produces `""` with
   `status:ok` because the vocabulary lacks the word and decode stops at the
   first token. Add a fallback or an explicit report line before the micro
-  lane claims any quality.
+  lane claims any quality. Verdict (2026-08-16): fixed twice over -- the
+  literal unknown answer for all-unknown prompts (v0.0.5) and the learned
+  `<unk>` hedge (E7): six hedge pairs teach "prompt contains `<unk>` ->
+  I do not know that word", generalizing to unseen OOV probes (6/6:
+  gravity, volcanoes, moon bright, lightning, mountains, contain). The
+  `</s>`/`<unk>` whole-token rule must handle attached punctuation
+  ("<unk>?") or the hedge trains on a fake token sequence. Held-out
+  unchanged by the tokenizer fix (3/4 exact, 0.7917 at the promoted
+  state).
 - **MoE as the later alternative.** arXiv 2406.16437 (ICLR 2025 Spotlight):
   expert specialization mitigates forgetting, but the gating network must
   stop updating for convergence and added experts cost additional rounds.
@@ -107,6 +136,13 @@ small enough to explain, test, and reverse.
 - Measure before changing implementation details.
 - Explore parallelism, allocation behavior, or SIMD as isolated experiments.
 - Record the readability cost of each optimization alongside its benchmark.
+- **KV-cache decode, landed (2026-08-16, E4).** `Layer::set_cache_mode`
+  seam (embeddings position cursor; blocks forward to their attention;
+  preallocated doubling K/V buffers); prefill excludes the last prompt
+  token, which becomes step 0's input. Byte-identical to recompute
+  (pinned by tests/kv_cache_test.rs), 3.98x at 122 tokens on the tiny
+  artifact (56.6 -> 225.5 tok/s). A concatenate-append first attempt
+  measured 0.53x -- the preallocated buffer is the lesson.
 - **Batched training, falsified at the roofline (2026-08-16).** ndarray's
   non-BLAS `dot` scales linearly with total rows, so stacking padded
   sequences buys only allocation/dispatch overhead: batch-4/8 matmuls run

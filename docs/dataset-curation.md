@@ -30,11 +30,17 @@ The curated data must stay within all of these limits:
 |---|---:|
 | Pretraining examples | 25 |
 | Pretraining whitespace tokens per epoch | 192 |
-| Chat examples | 53 |
+| Chat examples | 59 |
 | Chat whitespace tokens per epoch | 1,029 |
 | Combined model vocabulary | 120 |
 | Maximum whitespace tokens in one example | 25 |
 | Maximum model tokens in one example | 29 |
+
+The chat-example ceiling rose from 53 to 59 in v0.0.5 (E7): six hedge
+pairs teach the model to answer `I do not know that word.` when a prompt
+contains `<unk>` -- an epistemic capability, not paraphrase volume. The
+hedge pairs are written with the literal `<unk>` placeholder so the topic
+words never enter the vocabulary.
 
 The example and token budgets are ceilings, not targets. Purposeful
 paraphrases may repeat a fact, but one-off facts and synonyms do not belong in
@@ -64,6 +70,44 @@ trajectory [5.13, 1.54, 1.24, 1.28, 1.30] with a 1.24 floor (E2: 1.91).
 Item 3 became an exact match; items 1 and 4 remain wrong-but-fluent
 attractors (clouds family, rain family). Property suite: P2-P5 1.00, P6
 0.88.
+
+## Learned Unknown-Word Hedging (v0.0.5, E7)
+
+Every dataset-derived vocabulary now contains `<unk>`, and the tokenizer
+maps out-of-vocabulary words to it instead of silently dropping them (an
+all-`<unk>` prompt still decodes to the literal unknown answer). Six hedge
+pairs teach the model: a prompt containing `<unk>` deserves
+`I do not know that word.` rather than a confident in-domain answer.
+Tokenizer care: `<unk>` is a whole token even with attached punctuation
+("<unk>?"), otherwise the hedge trains on a fake `<` `unk` `>` sequence.
+Verdict (2026-08-16, seed 42): held-out exact 3/4, prefix 3/4, mean
+0.7917 (items 1-3 exact; item 4's condensation attractor is the residual);
+the hedge fires on unseen OOV probes ("What is gravity?", "How do
+volcanoes work?", "Why is the moon bright?", "How do mountains form?",
+"What is lightning?", "What does the ocean contain?") -- 6/6 hedged, no
+confident wrong answers.
+
+Follow-ups in the same release:
+
+- E8 (hedge stabilization): four more hedge pairs with varied `<unk>`
+  positions (swapped for redundant paraphrase pairs; the corpus stays at
+  59 chat examples; one exact duplicate pair was removed per the corpus
+  rule). Held-out exact 3/4, mean 0.8409; the full hedge fires on 9/10
+  unseen OOV probes.
+- E9 (conversation suite): a predeclared 20-probe score formula for the
+  interactive surface -- five classes (greeting, OOV, mixed, casual junk,
+  in-vocabulary single words) with per-prompt tokenization and OOV counts.
+  The property suite's prompt pool was frozen to the v0.0.4-era 32 prompts
+  so pass-table deltas stay comparable as the corpus grows.
+- E10 (social register): five greeting pairs ("hi!", "hello", "hey!",
+  "hi there", "good morning" -> "Hello!") swapped in at the same budget.
+  Held-out exact 4/4, prefix 4/4, mean 1.0 -- a perfect held-out score on
+  a clean corpus; greetings generalize to unseen forms ("good morning");
+  the conversation suite reports 16/17 out-of-domain prompts answered
+  with a hedge or greeting, never a confident water-cycle sentence or
+  fragment. Residuals, measured not hidden: one truncated hedge ("I do
+  not know that ."), one stuttered hedge, and the greeting attractor can
+  steal a single-word in-vocabulary prompt ("Water?" -> "Hello!").
 
 ## Relationship Between the Files
 

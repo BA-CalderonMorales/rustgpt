@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::io::IsTerminal;
 
 use ndarray::{Array1, Array2, Axis};
 
@@ -77,10 +78,12 @@ impl LLM {
         let output_tokens = self.forward(text);
 
         // Handle empty output: an explicit report, never a silent empty
-        // string. A prompt with no in-vocabulary token gets the unknown-word
-        // answer; an over-long prompt gets the truncation answer.
+        // string. A prompt with no in-vocabulary token (or only unknown
+        // tokens) gets the unknown-word answer; an over-long prompt gets
+        // the truncation answer.
         if output_tokens.is_empty() {
-            if self.tokenize(text).is_empty() {
+            let tokens = self.tokenize(text);
+            if tokens.is_empty() || (tokens.len() == 1 && self.is_entirely_unknown(&tokens)) {
                 return UNKNOWN_ANSWER.to_string();
             }
             return TRUNCATED_ANSWER.to_string();
@@ -100,8 +103,13 @@ impl LLM {
         let mut tokenized = self.tokenize(text);
         let mut output_tokens: Vec<usize> = Vec::new();
 
-        // Safety check: ensure we have at least one token
-        if tokenized.is_empty() {
+        // Safety check: ensure we have at least one token; a single
+        // entirely-unknown token also decodes nothing (predict emits the
+        // literal unknown answer). Multi-token unknown prompts go to the
+        // model, which has learned what they mean (greetings, hedges).
+        if tokenized.is_empty()
+            || (tokenized.len() == 1 && self.is_entirely_unknown(&tokenized))
+        {
             return output_tokens;
         }
 
@@ -168,7 +176,10 @@ impl LLM {
     fn forward_cached(&mut self, text: &str) -> Vec<usize> {
         let mut tokenized = self.tokenize(text);
         let mut output_tokens: Vec<usize> = Vec::new();
-        if tokenized.is_empty() || tokenized.len() >= self.max_seq_len {
+        if tokenized.is_empty()
+            || self.is_entirely_unknown(&tokenized)
+            || tokenized.len() >= self.max_seq_len
+        {
             return output_tokens;
         }
 
@@ -236,7 +247,8 @@ impl LLM {
     pub fn predict_cached(&mut self, text: &str) -> String {
         let output_tokens = self.forward_cached(text);
         if output_tokens.is_empty() {
-            if self.tokenize(text).is_empty() {
+            let tokens = self.tokenize(text);
+            if tokens.is_empty() || (tokens.len() == 1 && self.is_entirely_unknown(&tokens)) {
                 return UNKNOWN_ANSWER.to_string();
             }
             return TRUNCATED_ANSWER.to_string();
@@ -321,10 +333,25 @@ impl LLM {
             epoch_losses.push(epoch_loss);
             let message = format!("Epoch {}: Loss = {:.4}", epoch, epoch_loss);
             if progress_to_stderr {
-                eprintln!("{message}");
+                if std::io::stderr().is_terminal() {
+                    use std::io::Write;
+                    eprint!(
+                        "\rEpoch {}/{} | Loss = {:.4} | {}",
+                        epoch + 1,
+                        epochs,
+                        epoch_loss,
+                        Self::progress_bar(epoch + 1, epochs),
+                    );
+                    let _ = std::io::stderr().flush();
+                } else {
+                    eprintln!("{message}");
+                }
             } else {
                 println!("{message}");
             }
+        }
+        if progress_to_stderr && std::io::stderr().is_terminal() {
+            eprintln!();
         }
         epoch_losses
     }
@@ -420,7 +447,9 @@ impl LLM {
     /// seeded draw over the top-k ranks. The greedy contract is untouched.
     pub fn predict_sampled(&mut self, text: &str, k: usize, rng: &mut Xorshift) -> String {
         let mut tokenized = self.tokenize(text);
-        if tokenized.is_empty() {
+        if tokenized.is_empty()
+            || (tokenized.len() == 1 && self.is_entirely_unknown(&tokenized))
+        {
             return UNKNOWN_ANSWER.to_string();
         }
         if tokenized.len() >= self.max_seq_len {
@@ -476,10 +505,17 @@ impl LLM {
         let mut tokens = Vec::new();
 
         for word in text.split_whitespace() {
-            // Special case for end token
-            if word == "</s>" {
-                if let Some(token_id) = self.vocab.encode(word) {
+            // Special cases: whole-token markers must not split on their
+            // angle brackets, even when punctuation is attached ("<unk>?").
+            if let Some(rest) = word
+                .strip_prefix("</s>")
+                .or_else(|| word.strip_prefix("<unk>"))
+            {
+                if let Some(token_id) = self.vocab.encode(&word[..word.len() - rest.len()]) {
                     tokens.push(token_id);
+                }
+                for c in rest.chars().filter(|c| c.is_ascii_punctuation()) {
+                    self.push_token(&mut tokens, &c.to_string());
                 }
                 continue;
             }
@@ -490,30 +526,43 @@ impl LLM {
                 if c.is_ascii_punctuation() {
                     // If we have a word before the punctuation, add it
                     if !current_word.is_empty() {
-                        if let Some(token_id) = self.vocab.encode(&current_word) {
-                            tokens.push(token_id);
-                        }
+                        self.push_token(&mut tokens, &current_word);
                         current_word.clear();
                     }
 
                     // Add the punctuation as its own token
-                    if let Some(token_id) = self.vocab.encode(&c.to_string()) {
-                        tokens.push(token_id);
-                    }
+                    self.push_token(&mut tokens, &c.to_string());
                 } else {
                     current_word.push(c);
                 }
             }
 
             // Add any remaining word
-            if !current_word.is_empty()
-                && let Some(token_id) = self.vocab.encode(&current_word)
-            {
-                tokens.push(token_id);
+            if !current_word.is_empty() {
+                self.push_token(&mut tokens, &current_word);
             }
         }
 
         tokens
+    }
+
+    /// Push a word token, mapping out-of-vocabulary words to `<unk>` when
+    /// the vocabulary has one (the model then learns to hedge); words are
+    /// dropped only when the vocabulary lacks `<unk>` entirely.
+    fn push_token(&self, tokens: &mut Vec<usize>, word: &str) {
+        if let Some(token_id) = self.vocab.encode(word) {
+            tokens.push(token_id);
+        } else if let Some(unknown) = self.vocab.encode("<unk>") {
+            tokens.push(unknown);
+        }
+    }
+
+    /// True when every token is the unknown-word token: the prompt is
+    /// entirely out of vocabulary, so the literal unknown answer applies.
+    fn is_entirely_unknown(&self, tokens: &[usize]) -> bool {
+        self.vocab.encode("<unk>").is_some_and(|unknown| {
+            !tokens.is_empty() && tokens.iter().all(|&token| token == unknown)
+        })
     }
 
     /// Number of whitespace/punctuation tokens `text` splits into, counting
@@ -539,6 +588,19 @@ impl LLM {
             }
         }
         count
+    }
+
+    /// ASCII progress bar for the training loop's terminal view.
+    fn progress_bar(done: usize, total: usize) -> String {
+        const WIDTH: usize = 20;
+        let filled = done * WIDTH / total.max(1);
+        let mut bar = String::with_capacity(WIDTH + 2);
+        bar.push('[');
+        for i in 0..WIDTH {
+            bar.push(if i < filled { '#' } else { '.' });
+        }
+        bar.push(']');
+        bar
     }
 
     fn softmax(logits: &Array2<f32>) -> Array2<f32> {
