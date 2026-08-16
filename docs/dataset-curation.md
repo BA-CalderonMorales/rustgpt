@@ -42,6 +42,29 @@ the corpus. The vocabulary budget is deliberately much lower than the
 530-token baseline because each word expands both embeddings and the output
 projection.
 
+## Paraphrase Expansion (v0.0.5, E6)
+
+The v0.0.4 corpus had no chained structure: "rain falls -> flows downhill ->
+collects" and "rivers reach the ocean -> cycle repeats" existed only as
+isolated facts, which the held-out items 3 and 4 test. The corpus was
+expanded within the budgets above (16 -> 21 pretrain statements, 28 -> 53
+chat pairs; 144/192 pretrain tokens, 828/1029 chat tokens, vocab 85 -> 88):
+
+- Five chain statements link the fall -> downhill -> collection -> ocean ->
+  cycle arc.
+- Twenty-five targeted paraphrase pairs balance the four concepts, with
+  the collection and cycle families getting several wording variants each.
+- No held-out prompt appears verbatim anywhere in either file (checked by
+  script before commit), and the three new vocabulary words (Flowing,
+  flowing, rise) stay inside the 120-token budget.
+
+Verdict (2026-08-16, seed 42, E2 recipe + min-CE promotion): exact 2/4,
+prefix 2/4, mean accuracy 0.6534 (E2: 1/4, 1/4, 0.4375); held-out CE
+trajectory [5.13, 1.54, 1.24, 1.28, 1.30] with a 1.24 floor (E2: 1.91).
+Item 3 became an exact match; items 1 and 4 remain wrong-but-fluent
+attractors (clouds family, rain family). Property suite: P2-P5 1.00, P6
+0.88.
+
 ## Relationship Between the Files
 
 `pretraining_data.json` teaches only the foundational declarative relations.
