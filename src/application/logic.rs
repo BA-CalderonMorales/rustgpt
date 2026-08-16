@@ -206,21 +206,37 @@ fn run_e2e(prompt: String, llm: &mut LLM) {
     );
 }
 
+/// Interleave chat examples with pretrain statements at roughly 2:1 so
+/// every epoch rehearses both domains (arXiv 2403.05175 replay): the chat
+/// format survives phase 1 and the pretrain facts survive phase 2.
+fn interleave_replay(chat: &[String], pretrain: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(chat.len() + pretrain.len());
+    let mut chat_index = 0usize;
+    let mut pretrain_index = 0usize;
+    while chat_index < chat.len() || pretrain_index < pretrain.len() {
+        for _ in 0..2 {
+            if chat_index < chat.len() {
+                out.push(chat[chat_index].clone());
+                chat_index += 1;
+            }
+        }
+        if pretrain_index < pretrain.len() {
+            out.push(pretrain[pretrain_index].clone());
+            pretrain_index += 1;
+        }
+    }
+    out
+}
+
 fn train_pretraining(dataset: &Dataset, llm: &mut LLM, progress: bool) -> Vec<f32> {
-    let examples: Vec<&str> = dataset
-        .pretraining_data
-        .iter()
-        .map(String::as_str)
-        .collect();
+    let replayed = interleave_replay(&dataset.chat_training_data, &dataset.pretraining_data);
+    let examples: Vec<&str> = replayed.iter().map(String::as_str).collect();
     llm.train_with_progress(examples, PRETRAINING_EPOCHS, PRETRAINING_LR, progress)
 }
 
 fn train_tuning_part(dataset: &Dataset, llm: &mut LLM, epochs: usize, progress: bool) -> Vec<f32> {
-    let examples: Vec<&str> = dataset
-        .chat_training_data
-        .iter()
-        .map(String::as_str)
-        .collect();
+    let replayed = interleave_replay(&dataset.chat_training_data, &dataset.pretraining_data);
+    let examples: Vec<&str> = replayed.iter().map(String::as_str).collect();
     llm.train_with_progress(examples, epochs, TUNING_LR, progress)
 }
 
