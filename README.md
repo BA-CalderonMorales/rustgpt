@@ -22,39 +22,51 @@ every layer is meant to be read, traced, and tested.
 
 ## Quick Start
 
-Run the interactive training-and-chat loop, or use the fast machine-readable
-contract probe:
+Build the release binary, then reproduce the v0.0.5 truth table and talk to
+the trained artifact:
 
 ```bash
 git clone https://github.com/BA-CalderonMorales/rustgpt.git
 cd rustgpt
-cargo run                          # train on the water-cycle micro-domain, then chat
-cargo run -- --e2e "hello world"   # contract probe: one JSON object, no training
+cargo build --release
+
+target/release/llm --eval --seed 42                          # train + held-out score (exact 4/4, mean 1.0)
+target/release/llm --model models/watercycle-latest.bin --e2e 'User: hi!'    # probe the artifact
+target/release/llm --model models/watercycle-latest.bin      # chat with the trained artifact
 ```
 
-The default path pre-trains on 16 foundational statements, instruction-tunes on
-28 QA pairs, prints a sample prediction, and accepts prompts until `exit`.
-Because this is a small educational model, generated text is an observation of
-the mechanics, not a quality benchmark.
+`models/watercycle-latest.bin` is created by the eval command above (a
+missing `--model` path is a first-run save target for training modes).
+Running `target/release/llm` with no arguments enters interactive mode:
+it initializes a fresh random-seed model, prints the untrained model's
+noise, trains both phases (100 pretrain + 100 tuning epochs, live loss
+bar), and then chats until `exit`. Use `--seed 42` there too for a
+reproducible session. Because this is a small educational model, generated
+text is an observation of the mechanics -- measured, seeded, and pinned by
+the contract tests, not a quality benchmark.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `cargo run` | Build vocab, pre-train + instruction-tune, chat interactively |
-| `cargo run -- --e2e "..."` | Initialize model, generate once, print one JSON object (`status`, `output`, `total_parameters`) |
-| `cargo run -- --eval --seed 42` | Train both phases, score the four held-out prompts, print one JSON object (`exact`/`prefix`/`accuracy`) |
-| `cargo run -- --model models/mine.bin --eval --seed 42` | Save/load a trained checkpoint; eval reports the training trajectory |
-| `cargo run -- --tiny --train models/tinystories/train.jsonl --epochs 1 --model models/ts.bin` | Train the 14M-param laptop lane on a single JSONL corpus, save a checkpoint, print trajectory + samples |
-| `cargo fmt --check` | Format gate |
-| `cargo clippy --workspace --all-features --all-targets -- -D warnings` | Lint gate |
+| `target/release/llm` | Interactive: train from a fresh random seed, then chat until `exit` |
+| `target/release/llm --e2e "..."` | Contract probe: generate once, print one JSON object (`status`, `output`, `total_parameters`) |
+| `target/release/llm --eval --seed 42` | Train both phases, score the four held-out prompts, print the truth table (items, summary, CE trajectory) |
+| `target/release/llm --model <path> --eval --seed 42` | First-run saves the trained checkpoint; re-runs load it, continue training, re-save |
+| `target/release/llm --model <path> --e2e "..."` | Probe a trained artifact (unknown words answer `I do not know that word`) |
+| `target/release/llm --probe --model <path> --seed 42` | Decode-time compute truth table: seeded top-k best-of-N vs greedy |
+| `target/release/llm --tiny --eval --model models/tinystories/ts-13m-s42.bin` | Laptop lane score formula: held-out CE percentiles, coverage, collapse gate |
+| `target/release/llm --tiny --train <file.jsonl> --epochs 1 --model <out.bin>` | Train the 14M-param laptop lane on a JSONL corpus, print trajectory + samples + eval |
+| `cargo test --test output_properties_test -- --nocapture` | Property suite pass table against `models/watercycle-latest.bin` |
+| `cargo test --test conversation_suite_test -- --nocapture` | Conversation-surface suite (greetings, OOV, junk probes) |
+| `cargo fmt --check` / `cargo clippy --workspace --all-features --all-targets -- -D warnings` | Verify gates |
 | `cargo test --all-targets` | Unit, property/invariant, integration, and contract tests |
 | `cargo build --release` | Release binary (also produced by the release workflow) |
 
 E2E JSON contract:
 
 ```json
-{"output":"...","prompt":"hello world","status":"ok","total_parameters":380893}
+{"output":"...","prompt":"hello world","status":"ok","total_parameters":385776}
 ```
 
 ## Layout
