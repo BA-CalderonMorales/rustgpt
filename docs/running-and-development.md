@@ -102,11 +102,12 @@ cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin -
 ```
 
 `--temperature <t>` (default 1.0, `--tiny --eval` only, exit 2 otherwise)
-scales the output softmax logits by `1/t` in the gate's greedy decode. The
-greedy argmax is temperature-invariant, so the gate number is a pin at
-every T; the knob exists so the collapse gate can be measured under a
-peaked softmax and gives the probability-weighted sampling probe its
-baseline (see docs/learning-directions.md, W3 verdict).
+selects the gate's and the fluency probe's decoder: at T = 1.0 the
+pinned greedy leg (byte-identical at every T -- the greedy argmax is
+temperature-invariant), at every other T a seeded probability-weighted
+sampling leg that draws from the temperature-scaled softmax (see
+docs/learning-directions.md, W4 verdict). The sampled gate at T = 1.2
+measures 0.000 where greedy is pinned at 1.0.
 
 ### The fluency yardstick
 

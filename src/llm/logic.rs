@@ -195,11 +195,18 @@ impl LLM {
         output_tokens
     }
 
-    /// Cached decode: prefill fills every block's K/V cache in one pass,
-    /// then each step computes only the newest token's attention row.
-    /// Output is byte-identical to the recompute path (pinned by
-    /// tests/kv_cache_test.rs); this is the throughput lane's decoder.
-    fn forward_cached(&mut self, text: &str, temperature: f32) -> Vec<usize> {
+    /// Cached decode with a pluggable token selector: prefill fills every
+    /// block's K/V cache in one pass, then each step computes only the
+    /// newest token's attention row and asks `select` for the next token.
+    /// The greedy selector's output is byte-identical to the recompute
+    /// path (pinned by tests/kv_cache_test.rs); the weighted selector is
+    /// the probability-sampling leg.
+    fn decode_cached(
+        &mut self,
+        text: &str,
+        temperature: f32,
+        select: &mut dyn FnMut(&Array2<f32>) -> usize,
+    ) -> Vec<usize> {
         // Tokenize and guard the degenerate prompts, as the recompute path.
         let mut tokenized = self.tokenize(text);
         let mut output_tokens: Vec<usize> = Vec::new();
@@ -253,8 +260,7 @@ impl LLM {
             }
             let scaled = &input * (1.0 / temperature);
             let probs = Self::softmax(&scaled);
-            let tokens = Self::greedy_decode(&probs);
-            let next_token = tokens[tokens.len() - 1];
+            let next_token = select(&probs);
             output_tokens.push(next_token);
             tokenized.push(next_token);
             if next_token == self.vocab.encode("</s>").unwrap() {
@@ -267,6 +273,16 @@ impl LLM {
             layer.set_cache_mode(false);
         }
         output_tokens
+    }
+
+    /// The pinned greedy path through the cached decoder: scaling keeps
+    /// the argmax, so the token stream is byte-identical at every T.
+    fn forward_cached(&mut self, text: &str, temperature: f32) -> Vec<usize> {
+        let mut greedy = |probs: &Array2<f32>| {
+            let tokens = Self::greedy_decode(probs);
+            tokens[tokens.len() - 1]
+        };
+        self.decode_cached(text, temperature, &mut greedy)
     }
 
     /// Greedy prediction through the cached decode path; identical string
@@ -284,6 +300,19 @@ impl LLM {
     /// the collapse gate can be measured under a peaked output softmax.
     pub fn predict_scaled(&mut self, text: &str, temperature: f32) -> String {
         let output_tokens = self.forward_cached(text, temperature);
+        self.answer_string(text, &output_tokens)
+    }
+
+    /// Probability-weighted temperature sampling through the cached path:
+    /// each step draws from the temperature-scaled softmax distribution, so
+    /// every token is emitted with exactly its model-given probability
+    /// (rank-2+ tokens included). The caller's rng seeds the whole decode,
+    /// so a fixed seed reproduces the exact token stream. The greedy
+    /// semantics of `predict_scaled` are untouched.
+    pub fn predict_weighted(&mut self, text: &str, temperature: f32, rng: &mut Xorshift) -> String {
+        let output_tokens = self.decode_cached(text, temperature, &mut |probs: &Array2<f32>| {
+            Self::weighted_draw(probs, rng)
+        });
         self.answer_string(text, &output_tokens)
     }
 
@@ -654,6 +683,29 @@ impl LLM {
         let mut ranked: Vec<(usize, f32)> = probs.row(0).iter().copied().enumerate().collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
         ranked[rng.below(k.min(ranked.len()) as u64) as usize].0
+    }
+
+    /// Seeded probability-weighted draw over a 1-row softmax distribution:
+    /// a uniform draw mapped through the cumulative mass, so each token's
+    /// emission chance is exactly its model-given probability. Distinct
+    /// from `top_k_sample`, which flattens the top-k ranks.
+    fn weighted_draw(probs: &Array2<f32>, rng: &mut Xorshift) -> usize {
+        // One uniform draw over the row's total mass.
+        let row = probs.row(0);
+        let total: f32 = row.sum();
+        let draw = (rng.next_u64() as f64 / u64::MAX as f64) as f32 * total;
+
+        // Walk the cumulative mass until the draw lands.
+        let mut cumulative = 0.0f32;
+        for (index, &probability) in row.iter().enumerate() {
+            cumulative += probability;
+            if draw <= cumulative {
+                return index;
+            }
+        }
+
+        // Floating-point tail: the last token owns the residual mass.
+        row.len() - 1
     }
 
     pub fn tokenize(&self, text: &str) -> Vec<usize> {

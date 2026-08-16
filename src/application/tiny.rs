@@ -63,18 +63,33 @@ pub(crate) fn tiny_eval(llm: &mut LLM, temperature: f32) -> serde_json::Value {
 /// token pairs that are identical (a collapsed model approaches 1.0).
 /// The decode-quality yardstick over `samples` seeded generations from the
 /// fixed starter, scored by the llm::fluency_score instrument. The sampler
-/// is the lane's decoder at the run's temperature; greedy today, the
-/// probability-weighted temperature sampler from W4 when that lands.
+/// is the lane's decoder at the run's temperature: greedy at T=1.0 (the
+/// W3 calibration pin), seeded probability-weighted sampling otherwise.
 pub(crate) fn fluency_probe(llm: &mut LLM, temperature: f32, samples: usize) -> FluencyScore {
+    // One seeded PRNG for the whole batch: samples at a config are
+    // reproducible AND varied.
+    let mut rng = llm::Xorshift::new(llm::seed());
     let generated: Vec<String> = (0..samples)
-        .map(|_| llm.predict_scaled(TINY_STARTER, temperature))
+        .map(|_| {
+            if temperature == 1.0 {
+                llm.predict_scaled(TINY_STARTER, temperature)
+            } else {
+                llm.predict_weighted(TINY_STARTER, temperature, &mut rng)
+            }
+        })
         .collect();
     llm.fluency_score(&generated)
 }
 
 fn collapse_gate(llm: &mut LLM, temperature: f32) -> (f32, usize) {
-    // Generate the fixed-length sample.
-    let generated = llm.predict_scaled(TINY_STARTER, temperature);
+    // Generate the fixed-length sample: greedy at T=1.0 (the pinned leg),
+    // seeded probability-weighted sampling at every other T (the W4 leg).
+    let generated = if temperature == 1.0 {
+        llm.predict_scaled(TINY_STARTER, temperature)
+    } else {
+        let mut rng = llm::Xorshift::new(llm::seed());
+        llm.predict_weighted(TINY_STARTER, temperature, &mut rng)
+    };
     let tokens = llm.tokenize(&generated);
     let sample = &tokens[..tokens.len().min(TINY_SAMPLE_LEN)];
 

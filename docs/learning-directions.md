@@ -174,6 +174,36 @@ small enough to explain, test, and reverse.
 
 ## Training and Data (the collapse probes)
 
+- **Probability-weighted temperature sampling, LANDED (2026-08-16, W4,
+  seed 42).** Claim: "true stochastic temperature sampling at some T in
+  {0.7, 0.8, 0.9, 1.1, 1.2} yields repetition-free rate > 0 where greedy
+  at the same T is pinned at 1.0, on ts-13m-s42.bin." `predict_weighted`
+  draws from the temperature-scaled softmax with a seeded xorshift rng
+  through the cached decoder; `--tiny --eval --temperature <T>` samples
+  the gate and fluency probe at every T != 1.0 while T = 1.0 keeps the
+  pinned greedy leg. Table (--tiny --eval --model ts-13m-s42.bin
+  --temperature <T> --fluency 20, seed 42):
+
+  | T | gate rep. rate | distinct-1 | distinct-2 | rep-free rate | sents |
+  |---|--------------|-----------|-----------|--------------|-------|
+  | 1.0 | 1.0 (pin) | 0.008 | 0.008 | 0.00 | 123.0 |
+  | 0.7 | 0.095 | 0.387 | 0.859 | 0.00 | 22.1 |
+  | 0.8 | 0.021 | 0.522 | 0.948 | 0.00 | 15.6 |
+  | 0.9 | 0.021 | 0.598 | 0.978 | 0.05 | 11.4 |
+  | 1.1 | 0.011 | 0.774 | 0.998 | 0.25 | 7.0 |
+  | 1.2 | 0.000 | 0.820 | 1.000 | 0.60 | 5.7 |
+
+  Verdict: LANDED, the discovery. Every sampled T breaks the collapse
+  gate (0.000-0.095 vs the 1.0 greedy pin, far under the 0.5 collapse
+  line); T = 1.2 clears the W3 pass floor (repetition-free 0.60 >= 0.5,
+  distinct-1 0.82 >= 0.1); completions are multi-sentence (5.7-22
+  sentence-final marks over 123 tokens, never an early </s>). Diagnosis:
+  the attractor is a deterministic-argmax phenomenon -- the frequency
+  head wins the argmax because rank-2+ mass is never allowed to speak;
+  the falsified uniform top-k threw exactly that mass away. Qwen's
+  instruct T = 0.7 already lands the gate at 0.095 with distinct-1 0.39;
+  the residual within-sample repeats at low T are the next knob (W5's
+  presence/repetition penalties, Qwen's second knob).
 - **The continuous collapse profile, landed with a named falsification
   (2026-08-16, W2, seed 42).** Claim: "per-epoch top-1 margin, top-2 gap,
   logit norm, and softmax output entropy reveal the attractor's onset
