@@ -38,3 +38,10 @@ pub struct AnswerScore {
     pub prefix: bool,
     pub accuracy: f32,
 }
+
+/// One decoded step: the greedily chosen token id and the probability the
+/// output softmax assigned to it. Prompt tokens are not steps.
+pub struct DecodeStep {
+    pub token: usize,
+    pub prob: f32,
+}

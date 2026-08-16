@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 
 use ndarray::{Array1, Array2, Axis};
 
-use super::{AnswerScore, LLM, Layer};
+use super::{AnswerScore, DecodeStep, LLM, Layer};
 
 /// Literal answer for prompts whose tokens are all outside the vocabulary.
 /// The CLI contract pins this string: out-of-vocabulary input must never
@@ -76,11 +76,24 @@ impl LLM {
 
     pub fn predict(&mut self, text: &str) -> String {
         let output_tokens = self.forward(text);
+        self.answer_string(text, &output_tokens)
+    }
 
-        // Handle empty output: an explicit report, never a silent empty
-        // string. A prompt with no in-vocabulary token (or only unknown
-        // tokens) gets the unknown-word answer; an over-long prompt gets
-        // the truncation answer.
+    /// Same generation as `predict`, plus one `DecodeStep` per generated
+    /// token (greedy token id and its softmax probability). Prompt tokens
+    /// are not steps; an empty-output fallback answer yields no steps.
+    pub fn predict_with_steps(&mut self, text: &str) -> (String, Vec<DecodeStep>) {
+        let mut steps = Vec::new();
+        let output_tokens = self.decode_tokens(text, Some(&mut steps));
+        (self.answer_string(text, &output_tokens), steps)
+    }
+
+    /// Turn decoded tokens into the answer string. An empty decode is an
+    /// explicit report, never a silent empty string: a prompt with no
+    /// in-vocabulary token (or only unknown tokens) gets the unknown-word
+    /// answer; an over-long prompt gets the truncation answer. This is the
+    /// single authoritative home of that empty-output contract.
+    fn answer_string(&self, text: &str, output_tokens: &[usize]) -> String {
         if output_tokens.is_empty() {
             let tokens = self.tokenize(text);
             if tokens.is_empty() || (tokens.len() == 1 && self.is_entirely_unknown(&tokens)) {
@@ -88,17 +101,25 @@ impl LLM {
             }
             return TRUNCATED_ANSWER.to_string();
         }
-
-        // Convert token_ids to strings
-        let token_strs = output_tokens
+        output_tokens
             .iter()
             .map(|t| self.vocab.decode[t].clone())
-            .collect::<Vec<String>>();
-
-        token_strs.join(" ")
+            .collect::<Vec<String>>()
+            .join(" ")
     }
 
     fn forward(&mut self, text: &str) -> Vec<usize> {
+        self.decode_tokens(text, None)
+    }
+
+    /// Greedy decode with an optional per-step capture: when `capture` is
+    /// given, every generated token appends its `DecodeStep`. The shared
+    /// engine behind `predict` and `predict_with_steps`.
+    fn decode_tokens(
+        &mut self,
+        text: &str,
+        mut capture: Option<&mut Vec<DecodeStep>>,
+    ) -> Vec<usize> {
         // Tokenize the input text
         let mut tokenized = self.tokenize(text);
         let mut output_tokens: Vec<usize> = Vec::new();
@@ -107,9 +128,7 @@ impl LLM {
         // entirely-unknown token also decodes nothing (predict emits the
         // literal unknown answer). Multi-token unknown prompts go to the
         // model, which has learned what they mean (greetings, hedges).
-        if tokenized.is_empty()
-            || (tokenized.len() == 1 && self.is_entirely_unknown(&tokenized))
-        {
+        if tokenized.is_empty() || (tokenized.len() == 1 && self.is_entirely_unknown(&tokenized)) {
             return output_tokens;
         }
 
@@ -158,6 +177,13 @@ impl LLM {
 
             let next_token = tokens[tokens.len() - 1];
 
+            if let Some(steps) = capture.as_deref_mut() {
+                steps.push(DecodeStep {
+                    token: next_token,
+                    prob: probs[[0, next_token]],
+                });
+            }
+
             output_tokens.push(next_token);
             tokenized.push(next_token);
 
@@ -174,6 +200,7 @@ impl LLM {
     /// Output is byte-identical to the recompute path (pinned by
     /// tests/kv_cache_test.rs); this is the throughput lane's decoder.
     fn forward_cached(&mut self, text: &str) -> Vec<usize> {
+        // Tokenize and guard the degenerate prompts, as the recompute path.
         let mut tokenized = self.tokenize(text);
         let mut output_tokens: Vec<usize> = Vec::new();
         if tokenized.is_empty()
@@ -183,6 +210,7 @@ impl LLM {
             return output_tokens;
         }
 
+        // Switch every layer into decode-cache mode.
         for layer in &mut self.network {
             layer.set_cache_mode(true);
         }
@@ -206,17 +234,14 @@ impl LLM {
             }
         }
 
+        // One step per generated token, attending against the cache.
         for _ in 0..(self.max_seq_len - tokenized.len()) {
             if output_tokens.len() >= self.max_seq_len - 1 {
                 break;
             }
             let step_input = Array2::from_shape_vec(
                 (1, 1),
-                tokenized
-                    .last()
-                    .map(|&x| x as f32)
-                    .into_iter()
-                    .collect(),
+                tokenized.last().map(|&x| x as f32).into_iter().collect(),
             )
             .unwrap();
             let mut input = step_input;
@@ -236,6 +261,7 @@ impl LLM {
             }
         }
 
+        // Restore the stateless recompute behavior.
         for layer in &mut self.network {
             layer.set_cache_mode(false);
         }
@@ -246,18 +272,7 @@ impl LLM {
     /// to `predict`, produced by the KV-cache decoder.
     pub fn predict_cached(&mut self, text: &str) -> String {
         let output_tokens = self.forward_cached(text);
-        if output_tokens.is_empty() {
-            let tokens = self.tokenize(text);
-            if tokens.is_empty() || (tokens.len() == 1 && self.is_entirely_unknown(&tokens)) {
-                return UNKNOWN_ANSWER.to_string();
-            }
-            return TRUNCATED_ANSWER.to_string();
-        }
-        output_tokens
-            .iter()
-            .map(|t| self.vocab.decode[t].clone())
-            .collect::<Vec<String>>()
-            .join(" ")
+        self.answer_string(text, &output_tokens)
     }
 
     pub fn train(&mut self, data: Vec<&str>, epochs: usize, lr: f32) {
@@ -282,6 +297,7 @@ impl LLM {
         lr: f32,
         progress_to_stderr: bool,
     ) -> Vec<f32> {
+        // Tokenize every example once, truncated to the sequence budget.
         let tokenized_data = data
             .iter()
             .map(|input| {
@@ -291,6 +307,7 @@ impl LLM {
             })
             .collect::<Vec<Vec<usize>>>();
 
+        // One pass over the corpus per epoch.
         let mut epoch_losses = Vec::with_capacity(epochs);
         for epoch in 0..epochs {
             let mut total_loss = 0.0;
@@ -299,36 +316,31 @@ impl LLM {
                     continue;
                 }
 
-                // 1. Slice input and targets
-                let input_ids = &training_row[..training_row.len() - 1]; // Exclude the last token
-                let target_ids = &training_row[1..]; // This is a vector. Each element is the index in the vocab. 
+                // Slice the row into input and shifted targets.
+                let input_ids = &training_row[..training_row.len() - 1];
+                let target_ids = &training_row[1..];
 
-                // Forward pass
+                // Forward pass through every layer.
                 let mut input: Array2<f32> = Array2::zeros((1, input_ids.len()));
                 input
                     .row_mut(0)
                     .assign(&input_ids.iter().map(|&x| x as f32).collect::<Array1<f32>>());
-
                 for layer in &mut self.network {
                     input = layer.forward(&input);
                 }
-
-                let logits = input;
-                let probs = Self::softmax(&logits);
-
+                let probs = Self::softmax(&input);
                 total_loss += Self::cross_entropy_loss_step(&probs, target_ids);
 
-                // Backward pass
-                let mut grads_output = Self::compute_gradients_step(&probs, target_ids); // this is d_L/d_output_projection
-
-                // Apply gradient clipping BEFORE backpropagation
+                // Backward pass: softmax gradient, clipping BEFORE backprop.
+                let mut grads_output = Self::compute_gradients_step(&probs, target_ids);
                 Self::clip_gradients(&mut grads_output, 5.0);
-
                 for layer in self.network.iter_mut().rev() {
                     grads_output = layer.backward(&grads_output, lr);
                 }
             }
 
+            // Report the epoch average: live bar on a terminal, plain lines
+            // otherwise, on stderr when requested.
             let epoch_loss = total_loss / tokenized_data.len() as f32;
             epoch_losses.push(epoch_loss);
             let message = format!("Epoch {}: Loss = {:.4}", epoch, epoch_loss);
@@ -362,12 +374,14 @@ impl LLM {
     /// exactly the signal training optimizes. This is the trajectory probe
     /// for held-out data.
     pub fn sequence_loss(&mut self, text: &str) -> f32 {
+        // Tokenize, truncated to the sequence budget.
         let mut tokens = self.tokenize(text);
         tokens.truncate(self.max_seq_len);
         if tokens.len() < 2 {
             return 0.0;
         }
 
+        // Teacher-forced forward pass over the whole sequence.
         let mut input: Array2<f32> = Array2::zeros((1, tokens.len() - 1));
         input.row_mut(0).assign(
             &tokens[..tokens.len() - 1]
@@ -375,11 +389,11 @@ impl LLM {
                 .map(|&x| x as f32)
                 .collect::<Array1<f32>>(),
         );
-
         for layer in &mut self.network {
             input = layer.forward(&input);
         }
 
+        // Cross-entropy of every token against its prefix.
         let probs = Self::softmax(&input);
         Self::cross_entropy_loss_step(&probs, &tokens[1..])
     }
@@ -395,12 +409,14 @@ impl LLM {
     /// core of `answer_score` and the decode-time compute probe (one
     /// authoritative scoring implementation).
     pub fn score_generated(&self, generated: &str, reference: &str) -> AnswerScore {
+        // Tokenize both sides; the generated </s> does not count.
         let mut generated_tokens = self.tokenize(generated);
         let reference_tokens = self.tokenize(reference);
         if generated_tokens.last() == self.vocab.encode("</s>").as_ref() {
             generated_tokens.pop();
         }
 
+        // Matching positions over the longer of the two sequences.
         let matching = generated_tokens
             .iter()
             .zip(&reference_tokens)
@@ -408,6 +424,7 @@ impl LLM {
             .count();
         let positions = generated_tokens.len().max(reference_tokens.len()).max(1) as f32;
 
+        // Exact, prefix, and per-position verdicts.
         AnswerScore {
             exact: generated_tokens == reference_tokens,
             prefix: !generated_tokens.is_empty()
@@ -424,14 +441,19 @@ impl LLM {
     /// quality gate: no token repeated three times consecutively and no
     /// back-to-back n-gram window anywhere in the answer.
     pub fn is_degenerate(&self, text: &str) -> bool {
+        // Strip the trailing </s>; it is not part of the answer.
         let eos_id = self.vocab.encode("</s>");
         let mut tokens = self.tokenize(text);
         if tokens.last() == eos_id.as_ref() {
             tokens.pop();
         }
+
+        // A token repeated three times consecutively is degenerate.
         if tokens.windows(3).any(|w| w[0] == w[1] && w[1] == w[2]) {
             return true;
         }
+
+        // Any back-to-back n-gram window repeats the answer.
         for len in 2..=(tokens.len() / 2).min(12) {
             for i in 0..=(tokens.len() - 2 * len) {
                 if tokens[i..i + len] == tokens[i + len..i + 2 * len] {
@@ -446,16 +468,16 @@ impl LLM {
     /// mechanics to `predict`, with the greedy selection replaced by a
     /// seeded draw over the top-k ranks. The greedy contract is untouched.
     pub fn predict_sampled(&mut self, text: &str, k: usize, rng: &mut Xorshift) -> String {
+        // Guard the degenerate prompts with the literal fallbacks.
         let mut tokenized = self.tokenize(text);
-        if tokenized.is_empty()
-            || (tokenized.len() == 1 && self.is_entirely_unknown(&tokenized))
-        {
+        if tokenized.is_empty() || (tokenized.len() == 1 && self.is_entirely_unknown(&tokenized)) {
             return UNKNOWN_ANSWER.to_string();
         }
         if tokenized.len() >= self.max_seq_len {
             return TRUNCATED_ANSWER.to_string();
         }
 
+        // Decode step by step, drawing from the top-k ranks.
         let mut output_tokens = Vec::new();
         for _ in 0..(self.max_seq_len - tokenized.len()) {
             if output_tokens.len() >= self.max_seq_len - 1 {
@@ -501,12 +523,11 @@ impl LLM {
     }
 
     pub fn tokenize(&self, text: &str) -> Vec<usize> {
-        // Split by whitespace first
+        // Split by whitespace, then each word by its punctuation.
         let mut tokens = Vec::new();
-
         for word in text.split_whitespace() {
-            // Special cases: whole-token markers must not split on their
-            // angle brackets, even when punctuation is attached ("<unk>?").
+            // Whole-token markers must not split on their angle brackets,
+            // even when punctuation is attached ("<unk>?").
             if let Some(rest) = word
                 .strip_prefix("</s>")
                 .or_else(|| word.strip_prefix("<unk>"))
@@ -520,24 +541,21 @@ impl LLM {
                 continue;
             }
 
+            // Split the word's alphabetic core from its punctuation.
             let mut current_word = String::new();
-
             for c in word.chars() {
                 if c.is_ascii_punctuation() {
-                    // If we have a word before the punctuation, add it
                     if !current_word.is_empty() {
                         self.push_token(&mut tokens, &current_word);
                         current_word.clear();
                     }
-
-                    // Add the punctuation as its own token
                     self.push_token(&mut tokens, &c.to_string());
                 } else {
                     current_word.push(c);
                 }
             }
 
-            // Add any remaining word
+            // The trailing alphabetic core, if any.
             if !current_word.is_empty() {
                 self.push_token(&mut tokens, &current_word);
             }
@@ -604,17 +622,15 @@ impl LLM {
     }
 
     fn softmax(logits: &Array2<f32>) -> Array2<f32> {
-        // logits is seq_len x vocab_size
+        // Row-wise softmax over the vocabulary (logits is seq_len x vocab_size).
         let mut result = logits.clone();
-
-        // Apply softmax row-wise
         for mut row in result.rows_mut() {
-            // Calculate exp for each element
+            // Numerically stable exponentials around the row maximum.
             let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             let exp_values: Vec<f32> = row.iter().map(|&x| (x - max_val).exp()).collect();
             let sum_exp: f32 = exp_values.iter().sum();
 
-            // Normalize by sum
+            // Normalize the row to a probability distribution.
             for (i, &exp_val) in exp_values.iter().enumerate() {
                 row[i] = exp_val / sum_exp;
             }

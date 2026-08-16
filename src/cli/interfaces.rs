@@ -12,4 +12,5 @@ pub(crate) struct Invocation {
     pub model: Option<String>,
     pub epochs: usize,
     pub tiny: bool,
+    pub trace: bool,
 }

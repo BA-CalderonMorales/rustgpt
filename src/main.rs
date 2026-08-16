@@ -2,22 +2,24 @@ mod application;
 mod cli;
 
 fn main() {
+    // The CLI owns every argument: mode, seed, model path, epochs, and the
+    // trace flag. Machine modes default to seed 42; a bare interactive run
+    // draws a random seed (pass --seed 42 for a reproducible session).
     let invocation = cli::parse_invocation();
+
     llm::set_seed(invocation.seed);
+
+    // Two disjoint views: the interactive lane trains then chats; the
+    // headless lane serves exactly one JSON object.
     let dataset = application::load_datasets();
-    let train_path = match &invocation.mode {
-        cli::Mode::Train { path } => Some(path.as_str()),
-        _ => None,
-    };
-    let mut model = application::build_llm(
-        &dataset,
-        invocation.model.as_deref(),
-        train_path,
-        invocation.tiny,
-        matches!(
-            invocation.mode,
-            cli::Mode::Train { .. } | cli::Mode::Interactive | cli::Mode::Eval
-        ),
-    );
-    application::run(invocation, &dataset, &mut model);
+    let mut model = application::build_llm(&dataset, &invocation);
+
+    match invocation.mode {
+        cli::Mode::Interactive => {
+            application::run_interactive(&invocation, &dataset, &mut model);
+        }
+        _ => {
+            application::run_headless(&invocation, &dataset, &mut model);
+        }
+    }
 }

@@ -19,10 +19,11 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]\n",
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
+        "  llm --trace --seed 42\n",
         "  llm --e2e \"hello world\"\n",
         "  llm --eval --seed 42\n",
         "  llm --model models/mine.bin --eval --seed 42\n",
@@ -201,11 +202,33 @@ fn eval_and_e2e_are_mutually_exclusive() {
 }
 
 #[test]
+fn trace_is_rejected_outside_interactive_mode() {
+    for arguments in [
+        vec!["--trace", "--eval"],
+        vec!["--eval", "--trace"],
+        vec!["--trace", "--e2e", "hi"],
+        vec!["--trace", "--probe"],
+        vec!["--trace", "--train", "data/pretraining_data.json"],
+    ] {
+        let output = run(&arguments, &std::env::temp_dir());
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(
+            stderr(&output),
+            "error: --trace is only available in interactive mode\nTry 'llm --help' for usage.\n"
+        );
+    }
+}
+
+#[test]
 fn probe_requires_a_checkpoint() {
     let output = run(&["--probe"], Path::new(env!("CARGO_MANIFEST_DIR")));
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(stdout(&output), "");
-    assert_eq!(stderr(&output), "error: --probe requires --model <checkpoint>\n");
+    assert_eq!(
+        stderr(&output),
+        "error: --probe requires --model <checkpoint>\n"
+    );
 }
 
 #[test]

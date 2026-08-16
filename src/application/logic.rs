@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use llm::{
-    EMBEDDING_DIM, HIDDEN_DIM, LLM, MAX_SEQ_LEN, Vocab,
+    DecodeStep, EMBEDDING_DIM, HIDDEN_DIM, LLM, MAX_SEQ_LEN, Vocab,
     dataset_loader::{Dataset, DatasetType},
     embeddings::Embeddings,
     output_projection::OutputProjection,
@@ -9,6 +9,8 @@ use llm::{
 };
 
 use crate::cli::{Invocation, Mode};
+
+use super::Trace;
 
 const PRETRAINING_EPOCHS: usize = 100;
 const PRETRAINING_LR: f32 = 0.0005;
@@ -32,13 +34,19 @@ pub(crate) fn load_heldout() -> Vec<(String, String)> {
     entries
 }
 
-pub(crate) fn build_llm(
-    dataset: &Dataset,
-    model_path: Option<&str>,
-    train_path: Option<&str>,
-    tiny: bool,
-    can_initialize: bool,
-) -> LLM {
+pub(crate) fn build_llm(dataset: &Dataset, invocation: &Invocation) -> LLM {
+    // Derive the load/train targets and whether the mode may build fresh.
+    let model_path = invocation.model.as_deref();
+    let train_path = match &invocation.mode {
+        Mode::Train { path } => Some(path.as_str()),
+        _ => None,
+    };
+    let can_initialize = matches!(
+        invocation.mode,
+        Mode::Train { .. } | Mode::Interactive | Mode::Eval
+    );
+
+    // A checkpoint wins when it exists.
     if let Some(path) = model_path {
         if std::path::Path::new(path).exists() {
             eprintln!("Loading checkpoint {path}");
@@ -48,16 +56,17 @@ pub(crate) fn build_llm(
             });
         }
         // A missing checkpoint is a first-run target only for modes that
-        // train (--train, interactive, --eval, which always builds fresh
-        // when no checkpoint is given); --e2e must not silently fall back
-        // to a fresh model.
+        // train (--train, interactive, --eval); --e2e must not silently
+        // fall back to a fresh model.
         if train_path.is_none() && !can_initialize {
             eprintln!("error: checkpoint not found: {path}");
             std::process::exit(1);
         }
     }
+
+    // The --train lane builds a fresh tiny model from the corpus.
     if let Some(path) = train_path {
-        if !tiny {
+        if !invocation.tiny {
             eprintln!(
                 "error: --train requires --tiny (the language-model lane is the tiny preset)"
             );
@@ -66,7 +75,10 @@ pub(crate) fn build_llm(
         let texts = llm::load_jsonl(path);
         return build_tiny_llm(&texts);
     }
-    if tiny {
+
+    // The tiny flag needs a checkpoint or a corpus; otherwise build the
+    // water-cycle micro model.
+    if invocation.tiny {
         eprintln!("error: --tiny requires --model <checkpoint> or --train <file.jsonl>");
         std::process::exit(2);
     }
@@ -75,8 +87,8 @@ pub(crate) fn build_llm(
 
 /// Build the tiny preset (real-corpus lane) vocabulary and model.
 pub(crate) fn build_tiny_llm(texts: &[String]) -> LLM {
+    // The tiny preset's config, with a vocabulary harvested from the corpus.
     use llm::Config;
-
     let config = Config::tiny();
     let mut vocab_set = std::collections::HashSet::new();
     Vocab::process_text_for_vocab(texts, &mut vocab_set);
@@ -85,6 +97,7 @@ pub(crate) fn build_tiny_llm(texts: &[String]) -> LLM {
     let vocab_words_refs: Vec<&str> = vocab_words.iter().map(String::as_str).collect();
     let vocab = Vocab::new(vocab_words_refs);
 
+    // Assemble the network: embeddings, blocks, output projection.
     let mut network: Vec<Box<dyn llm::Layer>> = vec![Box::new(Embeddings::with_dims(
         vocab.clone(),
         config.embedding_dim,
@@ -104,15 +117,16 @@ pub(crate) fn build_tiny_llm(texts: &[String]) -> LLM {
 }
 
 pub(crate) fn build_model(dataset: &Dataset) -> LLM {
+    // Harvest the vocabulary from both data halves.
     let mut vocab_set = std::collections::HashSet::new();
     Vocab::process_text_for_vocab(&dataset.pretraining_data, &mut vocab_set);
     Vocab::process_text_for_vocab(&dataset.chat_training_data, &mut vocab_set);
-
     let mut vocab_words: Vec<String> = vocab_set.into_iter().collect();
     vocab_words.sort();
     let vocab_words_refs: Vec<&str> = vocab_words.iter().map(String::as_str).collect();
     let vocab = Vocab::new(vocab_words_refs);
 
+    // Assemble the fixed micro pipeline: embeddings, three blocks, projection.
     let transformer_block_1 = TransformerBlock::new(EMBEDDING_DIM, HIDDEN_DIM);
     let transformer_block_2 = TransformerBlock::new(EMBEDDING_DIM, HIDDEN_DIM);
     let transformer_block_3 = TransformerBlock::new(EMBEDDING_DIM, HIDDEN_DIM);
@@ -130,9 +144,13 @@ pub(crate) fn build_model(dataset: &Dataset) -> LLM {
     )
 }
 
-pub(crate) fn run(invocation: Invocation, dataset: &Dataset, llm: &mut LLM) {
-    match invocation.mode {
-        Mode::E2e { prompt } => run_e2e(prompt, llm),
+pub(crate) fn run_headless(invocation: &Invocation, dataset: &Dataset, llm: &mut LLM) {
+    // Every machine mode serves exactly one JSON object; the interactive
+    // mode has its own view and never reaches this dispatcher.
+    match &invocation.mode {
+        Mode::E2e { prompt } => {
+            run_e2e(prompt.clone(), llm);
+        }
         Mode::Eval => {
             if invocation.tiny {
                 crate::application::run_tiny_eval(llm);
@@ -141,7 +159,12 @@ pub(crate) fn run(invocation: Invocation, dataset: &Dataset, llm: &mut LLM) {
             }
         }
         Mode::Train { path } => {
-            run_training_lm(&path, llm, invocation.model.as_deref(), invocation.epochs)
+            run_training_lm(
+                path.as_str(),
+                llm,
+                invocation.model.as_deref(),
+                invocation.epochs,
+            );
         }
         Mode::Probe => {
             if invocation.model.is_none() {
@@ -151,18 +174,23 @@ pub(crate) fn run(invocation: Invocation, dataset: &Dataset, llm: &mut LLM) {
             crate::application::run_probe(llm);
         }
         Mode::Interactive => {
-            run_training_and_interactive(dataset, llm, invocation.model.as_deref())
+            unreachable!("interactive has its own view");
         }
     }
 }
 
+pub(crate) fn run_interactive(invocation: &Invocation, dataset: &Dataset, llm: &mut LLM) {
+    let trace = Trace::new(invocation.trace);
+    run_training_and_interactive(dataset, llm, invocation.model.as_deref(), &trace);
+}
+
 fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: usize) {
+    // Load the corpus; a degenerate file is a hard error.
     let texts = llm::load_jsonl(path);
     if texts.len() < 2 {
         eprintln!("error: --train needs at least 2 lines in {path}");
         std::process::exit(1);
     }
-
     eprintln!(
         "=== LANGUAGE MODEL TRAINING === {} stories, {} epochs, lr {}",
         texts.len(),
@@ -170,10 +198,12 @@ fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: 
         PRETRAINING_LR
     );
 
+    // Train, then persist the checkpoint.
     let examples: Vec<&str> = texts.iter().map(String::as_str).collect();
     let losses = llm.train_with_progress(examples, epochs, PRETRAINING_LR, true);
     save_checkpoint(llm, model_path);
 
+    // Sample a few fixed starters from the trained lane.
     let starters = ["Once upon a time,", "The sun", "Why did the"];
     let samples: Vec<serde_json::Value> = starters
         .iter()
@@ -185,6 +215,7 @@ fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: 
         })
         .collect();
 
+    // Exactly one JSON object: trajectory, samples, and the lane's eval.
     println!(
         "{}",
         serde_json::json!({
@@ -217,6 +248,8 @@ fn run_e2e(prompt: String, llm: &mut LLM) {
 /// every epoch rehearses both domains (arXiv 2403.05175 replay): the chat
 /// format survives phase 1 and the pretrain facts survive phase 2.
 fn interleave_replay(chat: &[String], pretrain: &[String]) -> Vec<String> {
+    // Round-robin with a 2:1 chat-to-pretrain ratio: each round takes two
+    // chat examples, then one pretrain statement.
     let mut out = Vec::with_capacity(chat.len() + pretrain.len());
     let mut chat_index = 0usize;
     let mut pretrain_index = 0usize;
@@ -253,17 +286,20 @@ fn mean_heldout_ce(llm: &mut LLM, sequences: &[String]) -> f32 {
 }
 
 fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM, model_path: Option<&str>) {
+    // Held-out chat sequences, teacher-forced per token.
     let heldout = load_heldout();
     let chat_sequences: Vec<String> = heldout
         .iter()
         .map(|(prompt, reference)| format!("User: {prompt} Assistant: {reference}"))
         .collect();
 
+    // Pretraining phase, tracked on the held-out CE curve.
     let mut trajectory_ce = vec![mean_heldout_ce(llm, &chat_sequences)];
     eprintln!("=== PRE-TRAINING ===");
     let pretrain_loss = train_pretraining(dataset, llm, true);
     trajectory_ce.push(mean_heldout_ce(llm, &chat_sequences));
 
+    // Tuning phase in thirds, snapshotting the min-CE state along the way.
     eprintln!("=== INSTRUCTION TUNING ===");
     let mut tuning_loss = Vec::new();
     let mut best_ce = f32::INFINITY;
@@ -299,20 +335,19 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM, model_path: Option<&s
             if layer.layer_type() != expected_type {
                 panic!("snapshot layer type mismatch");
             }
-            layer.load_parameter_bytes(payload).unwrap_or_else(|error| {
-                panic!("failed to restore min-CE state: {error}")
-            });
+            layer
+                .load_parameter_bytes(payload)
+                .unwrap_or_else(|error| panic!("failed to restore min-CE state: {error}"));
         }
         eprintln!("Promoting min-CE state (held-out CE {best_ce:.4}) into the artifact");
     }
-
     save_checkpoint(llm, model_path);
 
+    // Greedy scoring of every held-out item.
     let mut items = Vec::new();
     let mut accuracies = Vec::new();
     let mut exact_total = 0usize;
     let mut prefix_total = 0usize;
-
     for (prompt_text, reference) in &heldout {
         let prompt = format!("User: {prompt_text}");
         let generated = llm.predict(&prompt);
@@ -330,6 +365,7 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM, model_path: Option<&s
         }));
     }
 
+    // Accuracy summary: min/median/max of the per-item scores.
     accuracies.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median = match accuracies.len() {
         0 => 0.0,
@@ -337,6 +373,7 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM, model_path: Option<&s
         n => (accuracies[n / 2 - 1] + accuracies[n / 2]) / 2.0,
     };
 
+    // Exactly one JSON object: the full evidence record.
     println!(
         "{}",
         serde_json::json!({
@@ -371,9 +408,83 @@ fn save_checkpoint(llm: &mut LLM, model_path: Option<&str>) {
     }
 }
 
-fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM, model_path: Option<&str>) {
+/// Startup trace block: one event per domain that shaped the session, so
+/// the first glance at a trace says where the model came from.
+fn trace_startup(dataset: &Dataset, llm: &LLM, model_path: Option<&str>, trace: &Trace) {
+    trace.event("cli", &format!("mode=interactive seed={}", llm::seed()));
+    trace.event(
+        "configuration",
+        &format!("max_seq_len={MAX_SEQ_LEN} embedding_dim={EMBEDDING_DIM} hidden_dim={HIDDEN_DIM}"),
+    );
+    trace.event(
+        "dataset",
+        &format!(
+            "pretrain={} chat={} vocab={}",
+            dataset.pretraining_data.len(),
+            dataset.chat_training_data.len(),
+            llm.vocab.words.len()
+        ),
+    );
+    let checkpoint = match model_path {
+        Some(path) if std::path::Path::new(path).exists() => format!("loaded {path}"),
+        Some(path) => format!("fresh init (first-run target {path})"),
+        None => "fresh init".to_string(),
+    };
+    trace.event("checkpoint", &checkpoint);
+    trace.event(
+        "llm",
+        &format!(
+            "network: {} parameters: {}",
+            llm.network_description(),
+            llm.total_parameters()
+        ),
+    );
+}
+
+/// Per-turn trace block: tokenization, pipeline map, one line per decoded
+/// step, then the stop reason.
+fn trace_turn(llm: &LLM, formatted_input: &str, steps: &[DecodeStep], trace: &Trace) {
+    let decoded: Vec<String> = llm
+        .tokenize(formatted_input)
+        .iter()
+        .map(|token| llm.vocab.decode[token].clone())
+        .collect();
+    trace.event("vocab", &format!("{formatted_input:?} -> {decoded:?}"));
+
+    trace.event("llm", &format!("pipeline: {}", llm.network_description()));
+
+    for (index, step) in steps.iter().enumerate() {
+        trace.event(
+            "decode",
+            &format!(
+                "step {index}: {:?} p={:.4}",
+                llm.vocab.decode[&step.token], step.prob
+            ),
+        );
+    }
+    let stop = match steps.last().map(|step| step.token) {
+        Some(token) if Some(&token) == llm.vocab.encode("</s>").as_ref() => "</s>",
+        _ => "sequence budget",
+    };
+    trace.event(
+        "decode",
+        &format!("stop: {stop} after {} tokens", steps.len()),
+    );
+}
+
+fn run_training_and_interactive(
+    dataset: &Dataset,
+    llm: &mut LLM,
+    model_path: Option<&str>,
+    trace: &Trace,
+) {
+    // Startup trace: which domain shaped this session.
+    trace_startup(dataset, llm, model_path, trace);
+
+    // The fixed probe prompt this session demonstrates.
     let string = String::from("User: How do mountains form?");
 
+    // Model information.
     println!("\n=== MODEL INFORMATION ===");
     println!("Network architecture: {}", llm.network_description());
     println!(
@@ -383,10 +494,12 @@ fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM, model_path: Op
     println!("Total parameters: {}", llm.total_parameters());
     println!("Seed: {}", llm::seed());
 
+    // The untrained model's noise, for contrast.
     println!("\n=== BEFORE TRAINING ===");
     println!("Input: {}", string);
     println!("Output: {}", llm.predict(&string));
 
+    // Pretraining phase.
     println!("\n=== PRE-TRAINING MODEL ===");
     println!(
         "Pre-training on {} examples for {} epochs with learning rate {}",
@@ -394,8 +507,9 @@ fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM, model_path: Op
         PRETRAINING_EPOCHS,
         PRETRAINING_LR
     );
-    train_pretraining(dataset, llm, false);
+    train_pretraining(dataset, llm, true);
 
+    // Instruction tuning phase.
     println!("\n=== INSTRUCTION TUNING ===");
     println!(
         "Instruction tuning on {} examples for {} epochs with learning rate {}",
@@ -403,22 +517,25 @@ fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM, model_path: Op
         TUNING_EPOCHS,
         TUNING_LR
     );
-    train_tuning_part(dataset, llm, TUNING_EPOCHS, false);
+    train_tuning_part(dataset, llm, TUNING_EPOCHS, true);
 
+    // Persist the trained session.
     save_checkpoint(llm, model_path);
 
+    // The trained model's answer to the same prompt.
     println!("\n=== AFTER TRAINING ===");
     println!("Input: {}", string);
     let result = llm.predict(&string);
     println!("Output: {}", result);
     println!("======================\n");
 
+    // Chat loop until "exit".
     println!("\n--- Interactive Mode ---");
     println!("Type a prompt and press Enter to generate text.");
     println!("Type 'exit' to quit.");
-
     let mut input = String::new();
     loop {
+        // Read the next prompt.
         input.clear();
         print!("\nEnter prompt: ");
         std::io::stdout().flush().unwrap();
@@ -426,14 +543,23 @@ fn run_training_and_interactive(dataset: &Dataset, llm: &mut LLM, model_path: Op
             .read_line(&mut input)
             .expect("Failed to read input");
 
+        // The exit word ends the session.
         let trimmed_input = input.trim();
         if trimmed_input.eq_ignore_ascii_case("exit") {
             println!("Exiting interactive mode.");
             break;
         }
 
-        let formatted_input = format!("User: {}", trimmed_input);
-        let prediction = llm.predict(&formatted_input);
-        println!("Model output: {}", prediction);
+        // Traced turns capture every decode step; the default path keeps
+        // the untraced `predict` surface untouched.
+        let formatted_input = format!("User: {trimmed_input}");
+        let prediction = if trace.on {
+            let (output, steps) = llm.predict_with_steps(&formatted_input);
+            trace_turn(llm, &formatted_input, &steps, trace);
+            output
+        } else {
+            llm.predict(&formatted_input)
+        };
+        println!("Model output: {prediction}");
     }
 }

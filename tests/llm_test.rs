@@ -92,6 +92,57 @@ fn test_llm_tokenize() {
     }
 }
 
+fn steps_llm(vocab: Vocab) -> LLM {
+    let vocab_size = vocab.encode.len();
+    LLM::new(
+        vocab,
+        vec![Box::new(TestOutputProjectionLayer::new(5, 5, vocab_size))],
+    )
+}
+
+#[test]
+fn test_predict_with_steps_matches_predict() {
+    // In-vocab, OOV-hedge (unknown word maps to <unk>), and the literal
+    // unknown fallback: the traced string must equal the untraced one.
+    let vocab_with_unknown = Vocab::new(vec![
+        "hello", "world", "this", "is", "rust", "</s>", "<unk>",
+    ]);
+    for input in ["hello world this is rust", "hello zzzz", "zzzzzz"] {
+        let mut plain = steps_llm(Vocab::default());
+        let mut traced = steps_llm(vocab_with_unknown.clone());
+        let expected = plain.predict(input);
+        let (actual, _steps) = traced.predict_with_steps(input);
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
+fn test_predict_with_steps_reports_every_generated_token() {
+    let mut llm = steps_llm(Vocab::default());
+    let (generated, steps) = llm.predict_with_steps("hello world this is rust");
+
+    let generated_tokens = generated.split(' ').count();
+    assert_eq!(steps.len(), generated_tokens);
+    assert_eq!(steps.len(), 6);
+
+    for step in &steps {
+        assert!((0.0..=1.0).contains(&step.prob));
+    }
+    let joined: Vec<String> = steps
+        .iter()
+        .map(|step| llm.vocab.decode[&step.token].clone())
+        .collect();
+    assert_eq!(joined.join(" "), generated);
+}
+
+#[test]
+fn test_predict_with_steps_fallback_yields_no_steps() {
+    let mut llm = steps_llm(Vocab::default());
+    let (answer, steps) = llm.predict_with_steps("zzzzzz");
+    assert_eq!(answer, "Assistant : I do not know that word . </s>");
+    assert!(steps.is_empty());
+}
+
 #[test]
 fn test_llm_predict() {
     let vocab = Vocab::default();
