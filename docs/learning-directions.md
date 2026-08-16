@@ -174,6 +174,36 @@ small enough to explain, test, and reverse.
 
 ## Training and Data (the collapse probes)
 
+- **The repetition-penalty family, LANDED (2026-08-16, W5, seed 42).**
+  Claim: "a logit-level anti-repetition penalty -- presence (flat per
+  seen token) or repetition (scaled by count) -- deterministically
+  changes the argmax and breaks the loop at some coefficient." Two new
+  tiny-eval knobs: `--presence <c>` (flat additive, 0.0 = off) and
+  `--repetition <r>` (count-scaled divisor, 1.0 = off), applied to the
+  gate and fluency legs before the softmax. Two-axis grid at greedy on
+  ts-13m-s42.bin (gate repetition rate):
+
+  | presence \ repetition | 1.0 | 1.1 | 1.2 | 1.3 |
+  |----------------------|-----|-----|-----|-----|
+  | 0.1 | 1.000 | 0.000 | 0.000 | 0.000 |
+  | 0.5 | 0.968 | 0.000 | 0.000 | 0.000 |
+  | 1.0 | 0.926 | 0.000 | 0.000 | 0.000 |
+  | 1.5 | 0.926 | 0.000 | 0.000 | 0.000 |
+  | 2.0 | 0.832 | 0.000 | 0.000 | 0.000 |
+
+  Verdict: LANDED. The repetition axis is a TOTAL deterministic
+  loop-breaker: gate 0.000 at every presence, minimal-breaking
+  coefficient 1.1 (the first step above identity). The presence axis
+  alone never breaks the loop in-grid (1.000 -> 0.832 monotonically: it
+  shifts the attractor, it does not kill it). Diagnosis: the frequency-
+  head attractor is count-scaled, so the count-scaled penalty matches it
+  exactly; a flat presence just moves the winner. The Qwen-adjacent
+  greedy cell (presence 1.5, repetition 1.1) is fully clean on the W3
+  yardstick: gate 0.000, repetition-free 1.00, distinct-1 0.60,
+  distinct-2 0.90, ~10 sentence-final marks per 123-token completion.
+  The minimal cell (0.0, 1.1) breaks the gate (0.011) but keeps
+  within-sample repeats (rf 0.00) -- presence is what makes the samples
+  fully clean.
 - **Probability-weighted temperature sampling, LANDED (2026-08-16, W4,
   seed 42).** Claim: "true stochastic temperature sampling at some T in
   {0.7, 0.8, 0.9, 1.1, 1.2} yields repetition-free rate > 0 where greedy

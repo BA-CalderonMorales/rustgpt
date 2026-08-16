@@ -205,7 +205,7 @@ impl LLM {
         &mut self,
         text: &str,
         temperature: f32,
-        select: &mut dyn FnMut(&Array2<f32>) -> usize,
+        select: &mut dyn FnMut(&Array2<f32>, &[usize]) -> usize,
     ) -> Vec<usize> {
         // Tokenize and guard the degenerate prompts, as the recompute path.
         let mut tokenized = self.tokenize(text);
@@ -259,8 +259,7 @@ impl LLM {
                 break;
             }
             let scaled = &input * (1.0 / temperature);
-            let probs = Self::softmax(&scaled);
-            let next_token = select(&probs);
+            let next_token = select(&scaled, &output_tokens);
             output_tokens.push(next_token);
             tokenized.push(next_token);
             if next_token == self.vocab.encode("</s>").unwrap() {
@@ -275,11 +274,13 @@ impl LLM {
         output_tokens
     }
 
-    /// The pinned greedy path through the cached decoder: scaling keeps
-    /// the argmax, so the token stream is byte-identical at every T.
+    /// The pinned greedy path through the cached decoder: softmax then
+    /// argmax keeps the exact greedy stream, byte-identical at every T
+    /// (scaling preserves the argmax).
     fn forward_cached(&mut self, text: &str, temperature: f32) -> Vec<usize> {
-        let mut greedy = |probs: &Array2<f32>| {
-            let tokens = Self::greedy_decode(probs);
+        let mut greedy = |logits: &Array2<f32>, _generated: &[usize]| {
+            let probs = Self::softmax(logits);
+            let tokens = Self::greedy_decode(&probs);
             tokens[tokens.len() - 1]
         };
         self.decode_cached(text, temperature, &mut greedy)
@@ -310,9 +311,61 @@ impl LLM {
     /// so a fixed seed reproduces the exact token stream. The greedy
     /// semantics of `predict_scaled` are untouched.
     pub fn predict_weighted(&mut self, text: &str, temperature: f32, rng: &mut Xorshift) -> String {
-        let output_tokens = self.decode_cached(text, temperature, &mut |probs: &Array2<f32>| {
-            Self::weighted_draw(probs, rng)
-        });
+        let output_tokens =
+            self.decode_cached(text, temperature, &mut |logits: &Array2<f32>, _| {
+                let probs = Self::softmax(logits);
+                Self::weighted_draw(&probs, rng)
+            });
+        self.answer_string(text, &output_tokens)
+    }
+
+    /// Greedy decode with logit-level anti-repetition penalties: every
+    /// token present in the generated-so-far gets a flat `presence`
+    /// subtraction, and its logit is divided by `repetition` once per
+    /// occurrence. The penalty acts before the argmax, so it can break
+    /// the frequency-head attractor deterministically. Presence 0.0 and
+    /// repetition 1.0 are both off (the stream is then exactly
+    /// `predict_scaled`'s).
+    pub fn predict_penalized(
+        &mut self,
+        text: &str,
+        temperature: f32,
+        presence: f32,
+        repetition: f32,
+    ) -> String {
+        let output_tokens = self.decode_cached(
+            text,
+            temperature,
+            &mut |logits: &Array2<f32>, generated: &[usize]| {
+                let adjusted = Self::apply_penalties(logits, generated, presence, repetition);
+                let probs = Self::softmax(&adjusted);
+                let tokens = Self::greedy_decode(&probs);
+                tokens[tokens.len() - 1]
+            },
+        );
+        self.answer_string(text, &output_tokens)
+    }
+
+    /// Probability-weighted sampling with the same logit-level penalties
+    /// as `predict_penalized`: draws from the penalty-adjusted
+    /// temperature-scaled distribution with the caller's seeded rng.
+    pub fn predict_weighted_penalized(
+        &mut self,
+        text: &str,
+        temperature: f32,
+        presence: f32,
+        repetition: f32,
+        rng: &mut Xorshift,
+    ) -> String {
+        let output_tokens = self.decode_cached(
+            text,
+            temperature,
+            &mut |logits: &Array2<f32>, generated: &[usize]| {
+                let adjusted = Self::apply_penalties(logits, generated, presence, repetition);
+                let probs = Self::softmax(&adjusted);
+                Self::weighted_draw(&probs, rng)
+            },
+        );
         self.answer_string(text, &output_tokens)
     }
 
@@ -683,6 +736,35 @@ impl LLM {
         let mut ranked: Vec<(usize, f32)> = probs.row(0).iter().copied().enumerate().collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
         ranked[rng.below(k.min(ranked.len()) as u64) as usize].0
+    }
+
+    /// Logit-level anti-repetition penalties over the generated-so-far:
+    /// presence subtracts a flat amount from every seen token's logit;
+    /// repetition divides a seen token's logit by `repetition` once per
+    /// occurrence (1.0 is the identity). Both act before the softmax, so
+    /// they can move the argmax.
+    fn apply_penalties(
+        logits: &Array2<f32>,
+        generated: &[usize],
+        presence: f32,
+        repetition: f32,
+    ) -> Array2<f32> {
+        // Count occurrences of every generated token.
+        let mut counts = std::collections::HashMap::new();
+        for &token in generated {
+            *counts.entry(token).or_insert(0usize) += 1;
+        }
+
+        // Adjust the logit of each seen token by its presence and count.
+        let mut adjusted = logits.clone();
+        if !counts.is_empty() {
+            let mut row = adjusted.row_mut(0);
+            for (&token, &count) in &counts {
+                let scale = repetition.powi(count as i32);
+                row[token] = row[token] / scale - presence;
+            }
+        }
+        adjusted
     }
 
     /// Seeded probability-weighted draw over a 1-row softmax distribution:

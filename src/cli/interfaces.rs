@@ -16,4 +16,8 @@ pub(crate) struct Invocation {
     pub temperature: f32,
     /// Number of seeded fluency samples for the tiny-lane eval yardstick.
     pub fluency: Option<usize>,
+    /// Flat logit penalty per seen token (0.0 = off), tiny-lane eval only.
+    pub presence: f32,
+    /// Count-scaled logit penalty divisor (1.0 = off), tiny-lane eval only.
+    pub repetition: f32,
 }

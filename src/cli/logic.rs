@@ -3,11 +3,13 @@ use super::{Invocation, Mode};
 const DEFAULT_SEED: u64 = 42;
 const DEFAULT_EPOCHS: usize = 100;
 const DEFAULT_TEMPERATURE: f32 = 1.0;
+const DEFAULT_PRESENCE: f32 = 0.0;
+const DEFAULT_REPETITION: f32 = 1.0;
 
 fn usage() {
     // The one-line contract: flags first, then exactly one mode.
     println!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]"
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]"
     );
     println!();
 
@@ -22,6 +24,7 @@ fn usage() {
         "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin"
     );
     println!("  llm --tiny --eval --model models/ts.bin --fluency 20");
+    println!("  llm --tiny --eval --model models/ts.bin --temperature 0.7 --presence 1.5");
     println!("  llm --probe --model models/mine.bin --seed 42");
 }
 
@@ -37,6 +40,8 @@ fn try_parse() -> Result<Invocation, String> {
     let mut trace = false;
     let mut temperature = DEFAULT_TEMPERATURE;
     let mut fluency: Option<usize> = None;
+    let mut presence = DEFAULT_PRESENCE;
+    let mut repetition = DEFAULT_REPETITION;
 
     // Consume every argument in order.
     while index < args.len() {
@@ -107,6 +112,24 @@ fn try_parse() -> Result<Invocation, String> {
                         .map_err(|_| format!("invalid fluency sample count: {value}"))?,
                 );
             }
+            "--presence" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--presence requires a value".to_string())?;
+                index += 1;
+                presence = value
+                    .parse()
+                    .map_err(|_| format!("invalid presence: {value}"))?;
+            }
+            "--repetition" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--repetition requires a value".to_string())?;
+                index += 1;
+                repetition = value
+                    .parse()
+                    .map_err(|_| format!("invalid repetition: {value}"))?;
+            }
             "--e2e" => {
                 if mode.is_some() {
                     return Err(
@@ -174,6 +197,19 @@ fn try_parse() -> Result<Invocation, String> {
         return Err("--fluency needs at least one sample".to_string());
     }
 
+    // The penalty knobs belong to the tiny-lane eval formula alone.
+    if (presence != DEFAULT_PRESENCE || repetition != DEFAULT_REPETITION)
+        && !(tiny && matches!(mode, Mode::Eval))
+    {
+        return Err("--presence and --repetition require --tiny --eval".to_string());
+    }
+    if presence < 0.0 {
+        return Err("--presence must be non-negative".to_string());
+    }
+    if repetition < 1.0 {
+        return Err("--repetition must be >= 1.0".to_string());
+    }
+
     // Resolve the seed: machine modes default to 42, interactive draws
     // a random seed unless one was given.
     let seed = seed.unwrap_or(match mode {
@@ -191,6 +227,8 @@ fn try_parse() -> Result<Invocation, String> {
         trace,
         temperature,
         fluency,
+        presence,
+        repetition,
     })
 }
 
