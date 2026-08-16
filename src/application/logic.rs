@@ -198,9 +198,14 @@ fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: 
         PRETRAINING_LR
     );
 
-    // Train, then persist the checkpoint.
+    // Train, sampling the held-out logit-regime profile every epoch: the
+    // continuous instrument that makes collapse onset visible. Then persist
+    // the checkpoint.
     let examples: Vec<&str> = texts.iter().map(String::as_str).collect();
-    let losses = llm.train_with_progress(examples, epochs, PRETRAINING_LR, true);
+    let profile_stories = crate::application::tiny_heldout_stories();
+    let profile_texts: Vec<&str> = profile_stories.iter().map(String::as_str).collect();
+    let (losses, profile) =
+        llm.train_with_profile(examples, epochs, PRETRAINING_LR, true, &profile_texts);
     save_checkpoint(llm, model_path);
 
     // Sample a few fixed starters from the trained lane.
@@ -215,7 +220,8 @@ fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: 
         })
         .collect();
 
-    // Exactly one JSON object: trajectory, samples, and the lane's eval.
+    // Exactly one JSON object: trajectory, the per-epoch logit profile,
+    // samples, and the lane's eval.
     println!(
         "{}",
         serde_json::json!({
@@ -225,6 +231,7 @@ fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: 
             "stories": texts.len(),
             "epochs": epochs,
             "trajectory": { "loss": losses },
+            "profile": llm::profile_json(&profile),
             "samples": samples,
             "eval": crate::application::tiny_eval(llm, 1.0),
         })

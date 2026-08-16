@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 
 use ndarray::{Array1, Array2, Axis};
 
-use super::{AnswerScore, DecodeStep, LLM, Layer};
+use super::{AnswerScore, DecodeStep, LLM, Layer, LogitProfile};
 
 /// Literal answer for prompts whose tokens are all outside the vocabulary.
 /// The CLI contract pins this string: out-of-vocabulary input must never
@@ -299,7 +299,23 @@ impl LLM {
         lr: f32,
         progress_to_stderr: bool,
     ) -> Vec<f32> {
-        self.train_impl(data, epochs, lr, progress_to_stderr)
+        self.train_impl(data, epochs, lr, progress_to_stderr, None)
+            .0
+    }
+
+    /// Train for `epochs`, sampling the logit-regime profile over
+    /// `profile_texts` after every epoch. The two trajectories ride the
+    /// same runs, so a verdict (margin rises / entropy falls before the
+    /// collapse saturates) is read from one deterministic session.
+    pub fn train_with_profile(
+        &mut self,
+        data: Vec<&str>,
+        epochs: usize,
+        lr: f32,
+        progress_to_stderr: bool,
+        profile_texts: &[&str],
+    ) -> (Vec<f32>, Vec<LogitProfile>) {
+        self.train_impl(data, epochs, lr, progress_to_stderr, Some(profile_texts))
     }
 
     fn train_impl(
@@ -308,7 +324,8 @@ impl LLM {
         epochs: usize,
         lr: f32,
         progress_to_stderr: bool,
-    ) -> Vec<f32> {
+        profile_texts: Option<&[&str]>,
+    ) -> (Vec<f32>, Vec<LogitProfile>) {
         // Tokenize every example once, truncated to the sequence budget.
         let tokenized_data = data
             .iter()
@@ -321,6 +338,7 @@ impl LLM {
 
         // One pass over the corpus per epoch.
         let mut epoch_losses = Vec::with_capacity(epochs);
+        let mut profile = Vec::with_capacity(epochs);
         for epoch in 0..epochs {
             let mut total_loss = 0.0;
             for training_row in &tokenized_data {
@@ -351,6 +369,12 @@ impl LLM {
                 }
             }
 
+            // Sample the logit-regime profile over the probe stream, when the
+            // caller asked for it.
+            if let Some(texts) = profile_texts {
+                profile.push(self.eval_profile(texts));
+            }
+
             // Report the epoch average: live bar on a terminal, plain lines
             // otherwise, on stderr when requested.
             let epoch_loss = total_loss / tokenized_data.len() as f32;
@@ -377,7 +401,7 @@ impl LLM {
         if progress_to_stderr && std::io::stderr().is_terminal() {
             eprintln!();
         }
-        epoch_losses
+        (epoch_losses, profile)
     }
 
     /// Teacher-forced cross-entropy of one full sequence, without training.
@@ -408,6 +432,104 @@ impl LLM {
         // Cross-entropy of every token against its prefix.
         let probs = Self::softmax(&input);
         Self::cross_entropy_loss_step(&probs, &tokens[1..])
+    }
+
+    /// Teacher-forced logit-regime means over a whole token stream: the
+    /// continuous instrument behind the boolean collapse gate. Every
+    /// position contributes its top-1 margin, top-2 logit gap, logit norm,
+    /// and output entropy, averaged across the stream.
+    pub fn eval_profile(&mut self, texts: &[&str]) -> LogitProfile {
+        // Accumulators across every position of every text.
+        let mut margin_sum = 0.0f64;
+        let mut gap_sum = 0.0f64;
+        let mut norm_sum = 0.0f64;
+        let mut entropy_sum = 0.0f64;
+        let mut positions = 0usize;
+
+        // Teacher-forced forward pass over each text, exactly the signal
+        // training optimizes.
+        for text in texts {
+            let mut tokens = self.tokenize(text);
+            tokens.truncate(self.max_seq_len);
+            if tokens.len() < 2 {
+                continue;
+            }
+            let mut input: Array2<f32> = Array2::zeros((1, tokens.len() - 1));
+            input.row_mut(0).assign(
+                &tokens[..tokens.len() - 1]
+                    .iter()
+                    .map(|&x| x as f32)
+                    .collect::<Array1<f32>>(),
+            );
+            for layer in &mut self.network {
+                input = layer.forward(&input);
+            }
+
+            // Per-position statistics from the raw logits row.
+            for row in input.rows() {
+                let (margin, gap, norm, entropy) = Self::row_profile(&row);
+                margin_sum += margin as f64;
+                gap_sum += gap as f64;
+                norm_sum += norm as f64;
+                entropy_sum += entropy as f64;
+                positions += 1;
+            }
+        }
+
+        // The means over the stream (a degenerate stream yields zeroes).
+        LogitProfile {
+            top1_margin: (margin_sum / positions as f64) as f32,
+            top2_gap: (gap_sum / positions as f64) as f32,
+            logit_norm: (norm_sum / positions as f64) as f32,
+            entropy: (entropy_sum / positions as f64) as f32,
+        }
+    }
+
+    /// One row of logits -> top-1 margin, top-2 logit gap, logit norm, and
+    /// softmax output entropy. Two scans: rank the top-2 logits, then the
+    /// softmax sums for margin and entropy.
+    fn row_profile<S: ndarray::Data<Elem = f32>>(
+        row: &ndarray::ArrayBase<S, ndarray::Ix1>,
+    ) -> (f32, f32, f32, f32) {
+        // Rank the top-2 logits and the row norm in one scan.
+        let mut best = (f32::NEG_INFINITY, usize::MAX);
+        let mut second = (f32::NEG_INFINITY, usize::MAX);
+        let mut norm = 0.0f64;
+        for (index, &value) in row.iter().enumerate() {
+            if value > best.0 {
+                second = best;
+                best = (value, index);
+            } else if value > second.0 {
+                second = (value, index);
+            }
+            norm += value as f64 * value as f64;
+        }
+        let gap = best.0 - second.0;
+
+        // Softmax sums for the margin and the output entropy.
+        let mut exp_sum = 0.0f64;
+        let mut exp_best = 0.0f64;
+        let mut exp_second = 0.0f64;
+        let mut entropy = 0.0f64;
+        for (index, &value) in row.iter().enumerate() {
+            let exp_value = (value - best.0).exp() as f64;
+            exp_sum += exp_value;
+            if index == best.1 {
+                exp_best = exp_value;
+            } else if index == second.1 {
+                exp_second = exp_value;
+            }
+            if exp_value > 0.0 {
+                entropy += exp_value * exp_value.ln();
+            }
+        }
+
+        // Entropy of the normalized distribution, margin from the top-2
+        // softmax masses, norm rooted from the accumulated squares.
+        let p_sum = exp_sum.max(f32::EPSILON as f64);
+        let entropy = -(entropy / p_sum) + p_sum.ln();
+        let margin = ((exp_best - exp_second) / p_sum) as f32;
+        (margin, gap, norm.sqrt() as f32, entropy as f32)
     }
 
     /// Score a generated answer against a reference: greedy generation of
@@ -703,4 +825,15 @@ impl LLM {
             grads.mapv_inplace(|x| x * scale);
         }
     }
+}
+
+/// The per-epoch logit-regime profile as the machine-JSON block: one entry
+/// per epoch, four continuous instruments that make collapse onset visible.
+pub fn profile_json(profile: &[LogitProfile]) -> serde_json::Value {
+    serde_json::json!({
+        "top1_margin": profile.iter().map(|p| p.top1_margin).collect::<Vec<f32>>(),
+        "top2_gap": profile.iter().map(|p| p.top2_gap).collect::<Vec<f32>>(),
+        "logit_norm": profile.iter().map(|p| p.logit_norm).collect::<Vec<f32>>(),
+        "entropy": profile.iter().map(|p| p.entropy).collect::<Vec<f32>>(),
+    })
 }

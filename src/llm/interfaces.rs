@@ -45,3 +45,19 @@ pub struct DecodeStep {
     pub token: usize,
     pub prob: f32,
 }
+
+/// Per-position logit-regime statistics, averaged over a whole token
+/// stream. The collapse gate is a boolean terminal readout; these means
+/// make the attractor's formation visible as a trajectory before repetition
+/// saturates to 1.0.
+pub struct LogitProfile {
+    /// Mean softmax probability of the top-1 token minus the top-2 token:
+    /// a widening margin is the frequency-head attractor sharpening.
+    pub top1_margin: f32,
+    /// Mean raw-logit gap between the two most likely tokens.
+    pub top2_gap: f32,
+    /// Mean L2 norm of the raw logits row.
+    pub logit_norm: f32,
+    /// Mean softmax output entropy over the vocabulary.
+    pub entropy: f32,
+}

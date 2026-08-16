@@ -7,13 +7,20 @@ const TINY_HELDOUT: &str = "models/tinystories/heldout.jsonl";
 const TINY_SAMPLE_LEN: usize = 96;
 const COLLAPSE_THRESHOLD: f32 = 0.5;
 
+/// The held-out slice's stories: the fixed probe stream for the collapse
+/// profile, so training-mode instruments sample exactly what `--tiny
+/// --eval` scores.
+pub(crate) fn tiny_heldout_stories() -> Vec<String> {
+    llm::load_jsonl(TINY_HELDOUT)
+}
+
 /// Evaluate the tiny lane's score formula: per-item CE on the held-out
 /// slice, its p10/p50/p90 percentiles, vocab coverage, and a
 /// generation-collapse gate over a fixed-length greedy sample.
 pub(crate) fn tiny_eval(llm: &mut LLM, temperature: f32) -> serde_json::Value {
     // Per-item teacher-forced CE and vocabulary coverage over the held-out
     // slice (never a training slice).
-    let stories = llm::load_jsonl(TINY_HELDOUT);
+    let stories = tiny_heldout_stories();
     let mut per_item_ce = Vec::with_capacity(stories.len());
     let mut in_vocab = 0usize;
     let mut raw_total = 0usize;

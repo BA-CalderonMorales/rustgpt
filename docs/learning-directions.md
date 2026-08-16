@@ -17,12 +17,18 @@ small enough to explain, test, and reverse.
 - **The Qwen decode-knob family (observation, 2026-08-16).** Qwen3.8-27B's
   model card (open weights, apache-2.0) documents repetition control as a
   decode-time recipe: instruct mode `temperature=0.7, top_p=0.80,
-  top_k=20, presence_penalty=1.5, repetition_penalty=1.0`. We have
-  temperature and uniform top-k; we lack presence/repetition penalties and
-  probability-weighted top-k -- the untried decode-time levers for the
-  tiny-lane repetition gate. The temperature sweep (W3) tests the family's
-  cheapest member first; a presence-penalty probe is the natural follow-up
-  if temperature alone cannot hold the gate below 0.5.
+  top_k=20, min_p=0.0, presence_penalty=1.5, repetition_penalty=1.0`
+  (thinking mode: `temperature=1.0, top_p=0.95, min_p=0.0, penalties
+  off`). The card names presence_penalty as the "reduce endless
+  repetition" knob, recommendable 0-2, warning that values near 2 can mix
+  languages and cost quality -- exactly our collapse regime. We have
+  temperature and uniform top-k; we lack presence/repetition penalties,
+  probability-weighted temperature sampling, and top-p -- the untried
+  decode-time levers for the tiny-lane repetition gate. min_p is disabled
+  in both official recipes, so it is out of scope. The full instruct
+  stack (T=0.7 + top-p 0.80 + presence 1.5) is the shipped combination;
+  single-knob probes test each member, and the combined stack is the
+  highest-fidelity port for the final verdict.
 - **Temperature-scaled greedy, falsified (2026-08-16, W3, seed 42).** Claim:
   "logits / T before the output softmax moves the tiny-lane collapse-gate
   repetition rate below 0.5 from the T=1 pin of 1.0, without retraining."
@@ -168,6 +174,25 @@ small enough to explain, test, and reverse.
 
 ## Training and Data (the collapse probes)
 
+- **The continuous collapse profile, landed with a named falsification
+  (2026-08-16, W2, seed 42).** Claim: "per-epoch top-1 margin, top-2 gap,
+  logit norm, and softmax output entropy reveal the attractor's onset
+  before repetition saturates to 1.0." `--tiny --train` now samples a
+  `profile` block per epoch (mean top-1 margin, top-2 logit gap, logit
+  norm, softmax entropy over the held-out token stream, teacher-forced;
+  `--tiny --eval` JSON unchanged). Evidence run on the 300-story demo
+  slice (6 epochs, constant LR 5e-4): loss 6.146 -> 5.231, collapse
+  repetition 1.0, entropy 5.159 -> 4.802 (knee at epochs 3-4, where the
+  prior 3-epoch run measured 0.9684), logit norm 89.6 -> 141.2, top-1
+  margin flat-low 0.017-0.043 (0.017 at collapse), top-2 gap noisy
+  0.15-0.47. Verdict: the instrument works -- the regime shift is visible
+  as a trajectory (entropy falls, logit scale rises) before saturation --
+  but the margin half of the claim is FALSIFIED: the attractor is a
+  MOVING frequency head (p1-p2 stays small while the rank-1 identity
+  drifts), not a confidence corner, so instantaneous margin does not
+  foreshadow. The successor quantity is the free-running profile (logit
+  stats collected during the gate's 96-token sample itself -- the regime
+  where repetition actually happens); ready when a lever verdict needs it.
 - **Training budget at the recipe level, falsified (2026-08-16, seed 42).**
   Claim: "more epochs on the 300-story demo slice breaks the collapse
   gate." Table (--tiny --train models/tinystories/demo.jsonl --seed 42,
