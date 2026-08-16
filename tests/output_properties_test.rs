@@ -118,30 +118,12 @@ fn tokenize_roundtrip(llm: &LLM, text: &str) -> Vec<usize> {
     llm.tokenize(text)
 }
 
-fn has_degeneracy(tokens: &[usize], eos_id: usize) -> bool {
-    let t = if tokens.last() == Some(&eos_id) {
-        &tokens[..tokens.len() - 1]
-    } else {
-        tokens
-    };
-    if t.windows(3).any(|w| w[0] == w[1] && w[1] == w[2]) {
-        return true;
-    }
-    for len in 2..=(t.len() / 2).min(12) {
-        for i in 0..=(t.len() - 2 * len) {
-            if t[i..i + len] == t[i + len..i + 2 * len] {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 struct DrawStats {
     terminated: usize,
     formatted: usize,
     short: usize,
     nondegenerate: usize,
+    best_of_n_dominates: usize,
 }
 
 fn run_draws(llm: &mut LLM, generator: &mut PromptGen) -> DrawStats {
@@ -149,15 +131,18 @@ fn run_draws(llm: &mut LLM, generator: &mut PromptGen) -> DrawStats {
     let assistant_id = llm.vocab.encode("Assistant").expect("Assistant in vocab");
     let colon_id = llm.vocab.encode(":").expect("colon in vocab");
     let cap = llm.max_seq_len - 1;
+    let mut sampling = Xorshift::new(SUITE_SEED ^ 0x5EED);
     let mut stats = DrawStats {
         terminated: 0,
         formatted: 0,
         short: 0,
         nondegenerate: 0,
+        best_of_n_dominates: 0,
     };
     for _ in 0..DRAWS {
         let (question, reference) = generator.next(&llm.vocab);
-        let generated = llm.predict(&format!("User: {question}"));
+        let prompt = format!("User: {question}");
+        let generated = llm.predict(&prompt);
         let tokens = tokenize_roundtrip(llm, &generated);
         if tokens.last() == Some(&eos_id) || tokens.len() == cap {
             stats.terminated += 1;
@@ -169,8 +154,19 @@ fn run_draws(llm: &mut LLM, generator: &mut PromptGen) -> DrawStats {
         if tokens.len() <= ref_tokens.len() * 2 + 6 {
             stats.short += 1;
         }
-        if !has_degeneracy(&tokens, eos_id) {
+        if !llm.is_degenerate(&generated) {
             stats.nondegenerate += 1;
+        }
+        // P6: best-of-N (k=5, n=8, seeded) must dominate greedy's
+        // per-position score.
+        let greedy_accuracy = llm.score_generated(&generated, &reference).accuracy;
+        let mut best = 0.0f32;
+        for _ in 0..8 {
+            let candidate = llm.predict_sampled(&prompt, 5, &mut sampling);
+            best = best.max(llm.score_generated(&candidate, &reference).accuracy);
+        }
+        if best >= greedy_accuracy {
+            stats.best_of_n_dominates += 1;
         }
     }
     stats
@@ -216,10 +212,11 @@ fn p2_p5_properties_and_pass_table_hold_the_baseline() {
     let rate = |n: usize| n as f64 / DRAWS as f64;
     println!(
         "property pass table (seed {SUITE_SEED}, artifact {path}, {DRAWS} draws)\n\
-         P2 termination      {:>3}/{}  ({:.2})\n\
-         P3 format           {:>3}/{}  ({:.2})\n\
-         P4 budget           {:>3}/{}  ({:.2})\n\
-         P5 non-degeneracy   {:>3}/{}  ({:.2})",
+         P2 termination        {:>3}/{}  ({:.2})\n\
+         P3 format             {:>3}/{}  ({:.2})\n\
+         P4 budget             {:>3}/{}  ({:.2})\n\
+         P5 non-degeneracy     {:>3}/{}  ({:.2})\n\
+         P6 best-of-N dominates {:>3}/{}  ({:.2})",
         stats.terminated,
         DRAWS,
         rate(stats.terminated),
@@ -232,6 +229,9 @@ fn p2_p5_properties_and_pass_table_hold_the_baseline() {
         stats.nondegenerate,
         DRAWS,
         rate(stats.nondegenerate),
+        stats.best_of_n_dominates,
+        DRAWS,
+        rate(stats.best_of_n_dominates),
     );
 
     assert_eq!(stats.terminated, DRAWS, "P2: every answer must terminate");
@@ -251,6 +251,10 @@ fn p2_p5_properties_and_pass_table_hold_the_baseline() {
         rate(stats.formatted) >= BASELINE_FORMAT,
         "P3: format rate must not regress below the baseline"
     );
+    // P6 is a reported row, not a gate: dominance can legitimately fall
+    // when greedy improves (E3 measured 0.86 baseline -> 0.80 on E2). Its
+    // pass-table delta is the decode-probe claim's evidence, recorded per
+    // artifact, never asserted against.
 }
 
 // Baseline pass table, recorded 2026-08-16 on the canonical seed-42
@@ -260,3 +264,6 @@ fn p2_p5_properties_and_pass_table_hold_the_baseline() {
 const BASELINE_FORMAT: f64 = 0.94;
 const BASELINE_BUDGET: f64 = 1.0;
 const BASELINE_NONDEGENERATE: f64 = 0.92;
+// P6 reference row (first measurement 2026-08-16, canonical artifact):
+// best-of-N dominance 43/50 = 0.86; E2 artifact 40/50 = 0.80. Reported,
+// not asserted (see the P6 note in the test body).

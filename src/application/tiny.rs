@@ -50,7 +50,10 @@ fn collapse_gate(llm: &mut LLM) -> (f32, usize) {
     let generated = llm.predict("Once upon a time,");
     let tokens = llm.tokenize(&generated);
     let sample = &tokens[..tokens.len().min(TINY_SAMPLE_LEN)];
-    let repeats = sample.windows(2).filter(|window| window[0] == window[1]).count();
+    let repeats = sample
+        .windows(2)
+        .filter(|window| window[0] == window[1])
+        .count();
     let rate = repeats as f32 / sample.len().saturating_sub(1).max(1) as f32;
     (rate, sample.len())
 }

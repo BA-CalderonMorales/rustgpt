@@ -19,7 +19,7 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--e2e <prompt> | --eval | --train <file.jsonl>]\n",
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
@@ -27,6 +27,7 @@ fn help_flags_print_the_same_contract_without_loading_data() {
         "  llm --eval --seed 42\n",
         "  llm --model models/mine.bin --eval --seed 42\n",
         "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin\n",
+        "  llm --probe --model models/mine.bin --seed 42\n",
     );
 
     for flag in ["--help", "-h"] {
@@ -165,10 +166,7 @@ fn eval_rejects_bad_seed_arguments() {
 
 #[test]
 fn tiny_eval_requires_a_checkpoint() {
-    let output = run(
-        &["--tiny", "--eval"],
-        Path::new(env!("CARGO_MANIFEST_DIR")),
-    );
+    let output = run(&["--tiny", "--eval"], Path::new(env!("CARGO_MANIFEST_DIR")));
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(stdout(&output), "");
     assert_eq!(
@@ -198,8 +196,16 @@ fn eval_and_e2e_are_mutually_exclusive() {
     assert_eq!(stdout(&output), "");
     assert_eq!(
         stderr(&output),
-        "error: --e2e, --eval, and --train are mutually exclusive\nTry 'llm --help' for usage.\n"
+        "error: --e2e, --eval, --train, and --probe are mutually exclusive\nTry 'llm --help' for usage.\n"
     );
+}
+
+#[test]
+fn probe_requires_a_checkpoint() {
+    let output = run(&["--probe"], Path::new(env!("CARGO_MANIFEST_DIR")));
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "error: --probe requires --model <checkpoint>\n");
 }
 
 #[test]

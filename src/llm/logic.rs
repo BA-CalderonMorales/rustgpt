@@ -11,8 +11,8 @@ pub const UNKNOWN_ANSWER: &str = "Assistant : I do not know that word . </s>";
 /// Literal answer for prompts that exceed the model's sequence limit.
 const TRUNCATED_ANSWER: &str = "Assistant : The input is too long . </s>";
 use crate::{
-    EMBEDDING_DIM, Embeddings, HIDDEN_DIM, MAX_SEQ_LEN, Vocab, output_projection::OutputProjection,
-    transformer::TransformerBlock,
+    EMBEDDING_DIM, Embeddings, HIDDEN_DIM, MAX_SEQ_LEN, Vocab, Xorshift,
+    output_projection::OutputProjection, transformer::TransformerBlock,
 };
 
 impl Default for LLM {
@@ -281,29 +281,114 @@ impl LLM {
     /// `text`, then exact / prefix / per-position accuracy on tokens.
     pub fn answer_score(&mut self, text: &str, reference: &str) -> AnswerScore {
         let predicted = self.predict(text);
-        let mut generated = self.tokenize(&predicted);
+        self.score_generated(&predicted, reference)
+    }
+
+    /// Score an already-generated string against a reference; the shared
+    /// core of `answer_score` and the decode-time compute probe (one
+    /// authoritative scoring implementation).
+    pub fn score_generated(&self, generated: &str, reference: &str) -> AnswerScore {
+        let mut generated_tokens = self.tokenize(generated);
         let reference_tokens = self.tokenize(reference);
-        if generated.last() == self.vocab.encode("</s>").as_ref() {
-            generated.pop();
+        if generated_tokens.last() == self.vocab.encode("</s>").as_ref() {
+            generated_tokens.pop();
         }
 
-        let matching = generated
+        let matching = generated_tokens
             .iter()
             .zip(&reference_tokens)
             .filter(|(generated, reference)| generated == reference)
             .count();
-        let positions = generated.len().max(reference_tokens.len()).max(1) as f32;
+        let positions = generated_tokens.len().max(reference_tokens.len()).max(1) as f32;
 
         AnswerScore {
-            exact: generated == reference_tokens,
-            prefix: !generated.is_empty()
-                && generated.len() <= reference_tokens.len()
-                && generated
+            exact: generated_tokens == reference_tokens,
+            prefix: !generated_tokens.is_empty()
+                && generated_tokens.len() <= reference_tokens.len()
+                && generated_tokens
                     .iter()
                     .zip(&reference_tokens)
                     .all(|(generated, reference)| generated == reference),
             accuracy: matching as f32 / positions,
         }
+    }
+
+    /// Greedy determinism is a contract; `is_degenerate` is the decode
+    /// quality gate: no token repeated three times consecutively and no
+    /// back-to-back n-gram window anywhere in the answer.
+    pub fn is_degenerate(&self, text: &str) -> bool {
+        let eos_id = self.vocab.encode("</s>");
+        let mut tokens = self.tokenize(text);
+        if tokens.last() == eos_id.as_ref() {
+            tokens.pop();
+        }
+        if tokens.windows(3).any(|w| w[0] == w[1] && w[1] == w[2]) {
+            return true;
+        }
+        for len in 2..=(tokens.len() / 2).min(12) {
+            for i in 0..=(tokens.len() - 2 * len) {
+                if tokens[i..i + len] == tokens[i + len..i + 2 * len] {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Top-k sampled decode driven by the caller's PRNG: identical token
+    /// mechanics to `predict`, with the greedy selection replaced by a
+    /// seeded draw over the top-k ranks. The greedy contract is untouched.
+    pub fn predict_sampled(&mut self, text: &str, k: usize, rng: &mut Xorshift) -> String {
+        let mut tokenized = self.tokenize(text);
+        if tokenized.is_empty() {
+            return UNKNOWN_ANSWER.to_string();
+        }
+        if tokenized.len() >= self.max_seq_len {
+            return TRUNCATED_ANSWER.to_string();
+        }
+
+        let mut output_tokens = Vec::new();
+        for _ in 0..(self.max_seq_len - tokenized.len()) {
+            if output_tokens.len() >= self.max_seq_len - 1 {
+                break;
+            }
+            let token_input = Array2::from_shape_vec(
+                (1, tokenized.len()),
+                tokenized.iter().map(|&x| x as f32).collect(),
+            )
+            .unwrap();
+            let mut input = token_input;
+            for layer in &mut self.network {
+                input = layer.forward(&input);
+            }
+            if input.shape()[0] == 0 {
+                break;
+            }
+            let last_logit = input
+                .row(input.shape()[0] - 1)
+                .to_owned()
+                .insert_axis(Axis(0));
+            let probs = Self::softmax(&last_logit);
+            let next_token = Self::top_k_sample(&probs, k, rng);
+            output_tokens.push(next_token);
+            tokenized.push(next_token);
+            if next_token == self.vocab.encode("</s>").unwrap() {
+                break;
+            }
+        }
+
+        output_tokens
+            .iter()
+            .map(|t| self.vocab.decode[t].clone())
+            .collect::<Vec<String>>()
+            .join(" ")
+    }
+
+    /// Uniform seeded draw over the top-k probability ranks.
+    fn top_k_sample(probs: &Array2<f32>, k: usize, rng: &mut Xorshift) -> usize {
+        let mut ranked: Vec<(usize, f32)> = probs.row(0).iter().copied().enumerate().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+        ranked[rng.below(k.min(ranked.len()) as u64) as usize].0
     }
 
     pub fn tokenize(&self, text: &str) -> Vec<usize> {

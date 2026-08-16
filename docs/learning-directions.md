@@ -68,7 +68,19 @@ small enough to explain, test, and reverse.
   self-consistency, greedy contract untouched. Claim: sampled candidates
   recover more exact/prefix matches than greedy on `data/heldout.json`.
   The observed greedy failure (wrong-attractor recitation, mid-sentence
-  fragments) is exactly the case sampling can recover.
+  fragments) is exactly the case sampling can recover. Verdict (2026-08-16,
+  seed 42, E2 recipe model `models/watercycle-e2.bin`): falsified.
+  Best-of-N by per-position score at every (k, N) in {3, 5, 8} x {8, 16}
+  lands below greedy: 0 exact / 0 prefix / mean 0.107-0.283 vs greedy 1/4,
+  1/4, 0.438. Diagnosis: uniform-over-top-k discards the sharp greedy mass;
+  a micro model's rank-2+ tokens are noise, so sampled candidates spread
+  the beam instead of recovering the attractor. The loop-recovery case
+  vanished too: the E2 recipe no longer loops on item 3, so there is no
+  attractor left for sampling to escape. P6 dominance row: 0.86 (baseline)
+  -> 0.80 (E2): sampling never dominates a greedy that improved. Opt-in
+  probe stays (mechanism + truth table shipped); the next decode lever is
+  probability-weighted sampling or self-consistency ranking, not uniform
+  top-k.
 - **Test-time compute scaling.** arXiv 2408.03314: compute-optimal per-prompt
   allocation beats best-of-N 4x and outperforms a 14x larger model in a
   FLOPs-matched comparison. Assessment for this lane: the decode probe above

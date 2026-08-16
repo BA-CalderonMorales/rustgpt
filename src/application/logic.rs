@@ -143,6 +143,13 @@ pub(crate) fn run(invocation: Invocation, dataset: &Dataset, llm: &mut LLM) {
         Mode::Train { path } => {
             run_training_lm(&path, llm, invocation.model.as_deref(), invocation.epochs)
         }
+        Mode::Probe => {
+            if invocation.model.is_none() {
+                eprintln!("error: --probe requires --model <checkpoint>");
+                std::process::exit(2);
+            }
+            crate::application::run_probe(llm);
+        }
         Mode::Interactive => {
             run_training_and_interactive(dataset, llm, invocation.model.as_deref())
         }

@@ -5,7 +5,7 @@ const DEFAULT_EPOCHS: usize = 100;
 
 fn usage() {
     println!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--e2e <prompt> | --eval | --train <file.jsonl>]"
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]"
     );
     println!();
     println!("Examples:");
@@ -16,6 +16,7 @@ fn usage() {
     println!(
         "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin"
     );
+    println!("  llm --probe --model models/mine.bin --seed 42");
 }
 
 fn try_parse() -> Result<Invocation, String> {
@@ -74,7 +75,7 @@ fn try_parse() -> Result<Invocation, String> {
             "--tiny" => tiny = true,
             "--e2e" => {
                 if mode.is_some() {
-                    return Err("--e2e, --eval, and --train are mutually exclusive".to_string());
+                    return Err("--e2e, --eval, --train, and --probe are mutually exclusive".to_string());
                 }
                 let prompt = args
                     .get(index)
@@ -86,13 +87,13 @@ fn try_parse() -> Result<Invocation, String> {
             }
             "--eval" => {
                 if mode.is_some() {
-                    return Err("--e2e, --eval, and --train are mutually exclusive".to_string());
+                    return Err("--e2e, --eval, --train, and --probe are mutually exclusive".to_string());
                 }
                 mode = Some(Mode::Eval);
             }
             "--train" => {
                 if mode.is_some() {
-                    return Err("--e2e, --eval, and --train are mutually exclusive".to_string());
+                    return Err("--e2e, --eval, --train, and --probe are mutually exclusive".to_string());
                 }
                 let path = args
                     .get(index)
@@ -100,13 +101,19 @@ fn try_parse() -> Result<Invocation, String> {
                 index += 1;
                 mode = Some(Mode::Train { path: path.clone() });
             }
+            "--probe" => {
+                if mode.is_some() {
+                    return Err("--e2e, --eval, --train, and --probe are mutually exclusive".to_string());
+                }
+                mode = Some(Mode::Probe);
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
 
     let mode = mode.unwrap_or(Mode::Interactive);
     let seed = seed.unwrap_or(match mode {
-        Mode::Eval | Mode::E2e { .. } | Mode::Train { .. } => DEFAULT_SEED,
+        Mode::Eval | Mode::E2e { .. } | Mode::Train { .. } | Mode::Probe => DEFAULT_SEED,
         Mode::Interactive => rand::random::<u64>(),
     });
 
