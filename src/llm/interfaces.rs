@@ -16,6 +16,11 @@ pub trait Layer {
 
     /// Restore learned weights from `parameter_bytes` output.
     fn load_parameter_bytes(&mut self, bytes: &[u8]) -> Result<(), bincode::error::DecodeError>;
+
+    /// Turn per-position decode caching on or off. The default is a
+    /// stateless pass-through; embeddings and attention hold the cache
+    /// state. Outputs are byte-identical to the uncached forward path.
+    fn set_cache_mode(&mut self, _active: bool) {}
 }
 
 #[allow(clippy::upper_case_acronyms)]

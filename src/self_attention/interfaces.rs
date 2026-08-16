@@ -11,4 +11,8 @@ pub struct SelfAttention {
     pub(super) optimizer_w_q: Adam,
     pub(super) optimizer_w_k: Adam,
     pub(super) optimizer_w_v: Adam,
+    /// Decode-time K/V cache: preallocated per-position keys and values per
+    /// block plus the filled-row count. Never part of a checkpoint.
+    pub(super) kv_cache: Option<(Array2<f32>, Array2<f32>, usize)>,
+    pub(super) step_mode: bool,
 }

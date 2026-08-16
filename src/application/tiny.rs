@@ -47,7 +47,7 @@ pub(crate) fn tiny_eval(llm: &mut LLM) -> serde_json::Value {
 /// Greedy sample from a fixed starter; rate is the fraction of adjacent
 /// token pairs that are identical (a collapsed model approaches 1.0).
 fn collapse_gate(llm: &mut LLM) -> (f32, usize) {
-    let generated = llm.predict("Once upon a time,");
+    let generated = llm.predict_cached("Once upon a time,");
     let tokens = llm.tokenize(&generated);
     let sample = &tokens[..tokens.len().min(TINY_SAMPLE_LEN)];
     let repeats = sample

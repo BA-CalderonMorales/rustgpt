@@ -180,7 +180,7 @@ fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: 
         .map(|starter| {
             serde_json::json!({
                 "prompt": starter,
-                "generated": llm.predict(starter),
+                "generated": llm.predict_cached(starter),
             })
         })
         .collect();

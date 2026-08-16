@@ -51,6 +51,10 @@ impl Layer for TransformerBlock {
         self.attention.backward(&grad_norm1, lr)
     }
 
+    fn set_cache_mode(&mut self, active: bool) {
+        self.attention.set_cache_mode(active);
+    }
+
     fn parameters(&self) -> usize {
         self.attention.parameters()
             + self.feed_forward.parameters()

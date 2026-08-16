@@ -5,7 +5,7 @@ use bincode::{
     error::{DecodeError, EncodeError},
     serde::{decode_from_slice, encode_to_vec},
 };
-use ndarray::Array2;
+use ndarray::{Array2, s};
 use rand_distr::{Distribution, Normal};
 
 use super::SelfAttention;
@@ -34,6 +34,8 @@ impl SelfAttention {
             optimizer_w_q: Adam::new((embedding_dim, embedding_dim)),
             optimizer_w_k: Adam::new((embedding_dim, embedding_dim)),
             optimizer_w_v: Adam::new((embedding_dim, embedding_dim)),
+            kv_cache: None,
+            step_mode: false,
         }
     }
 
@@ -119,9 +121,67 @@ impl Layer for SelfAttention {
 
     fn forward(&mut self, input: &Array2<f32>) -> Array2<f32> {
         self.cached_input = Some(input.clone());
-        let qkv = self.compute_qkv(input);
-        let attention = self.attention(&qkv.0, &qkv.1, &qkv.2);
-        attention + input // residual connection (no LayerNorm here)
+        if !self.step_mode {
+            let qkv = self.compute_qkv(input);
+            let attention = self.attention(&qkv.0, &qkv.1, &qkv.2);
+            return attention + input; // residual connection (no LayerNorm here)
+        }
+        // Decode path: append this position's K/V, then attend against the
+        // growing cache. The prefill call (full input) fills the cache and
+        // produces scores identical to the uncached path; step calls (one
+        // row) compute only the newest query row. The buffer grows by
+        // doubling, so a step never copies the whole cache.
+        let q = input.dot(&self.w_q);
+        let k = input.dot(&self.w_k);
+        let v = input.dot(&self.w_v);
+        match &mut self.kv_cache {
+            None => {
+                let capacity = input.nrows().max(1) * 2;
+                let mut cache_k = Array2::zeros((capacity, self.embedding_dim));
+                let mut cache_v = Array2::zeros((capacity, self.embedding_dim));
+                cache_k
+                    .slice_mut(s![..input.nrows(), ..])
+                    .assign(&k);
+                cache_v
+                    .slice_mut(s![..input.nrows(), ..])
+                    .assign(&v);
+                self.kv_cache = Some((cache_k, cache_v, input.nrows()));
+            }
+            Some((cache_k, cache_v, filled)) => {
+                if *filled + input.nrows() > cache_k.nrows() {
+                    let capacity = (cache_k.nrows() + input.nrows()) * 2;
+                    let mut bigger_k = Array2::zeros((capacity, self.embedding_dim));
+                    let mut bigger_v = Array2::zeros((capacity, self.embedding_dim));
+                    bigger_k.slice_mut(s![..*filled, ..]).assign(cache_k);
+                    bigger_v.slice_mut(s![..*filled, ..]).assign(cache_v);
+                    *cache_k = bigger_k;
+                    *cache_v = bigger_v;
+                }
+                cache_k.slice_mut(s![*filled..*filled + input.nrows(), ..]).assign(&k);
+                cache_v.slice_mut(s![*filled..*filled + input.nrows(), ..]).assign(&v);
+                *filled += input.nrows();
+            }
+        }
+        let (cache_k, cache_v, filled) = self.kv_cache.as_ref().expect("kv cache filled");
+        let dk = (self.embedding_dim as f32).sqrt();
+        let k_view = cache_k.slice(s![..*filled, ..]);
+        let v_view = cache_v.slice(s![..*filled, ..]);
+        let mut scores = q.dot(&k_view.t()) / dk;
+        let seq_len = scores.shape()[0];
+        for i in 0..seq_len {
+            for j in (i + 1)..seq_len {
+                scores[[i, j]] = f32::NEG_INFINITY;
+            }
+        }
+        let weights = self.softmax(&scores);
+        weights.dot(&v_view) + input
+    }
+
+    fn set_cache_mode(&mut self, active: bool) {
+        self.step_mode = active;
+        if active {
+            self.kv_cache = None;
+        }
     }
 
     fn backward(&mut self, grads: &Array2<f32>, lr: f32) -> Array2<f32> {

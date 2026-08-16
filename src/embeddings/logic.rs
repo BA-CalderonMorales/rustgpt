@@ -17,6 +17,8 @@ impl Default for Embeddings {
             cached_input: None,
             token_optimizer: Adam::new((Vocab::default_words().len(), EMBEDDING_DIM)),
             positional_optimizer: Adam::new((MAX_SEQ_LEN, EMBEDDING_DIM)),
+            step_mode: false,
+            position: 0,
         }
     }
 }
@@ -33,6 +35,8 @@ impl Embeddings {
             cached_input: None,
             token_optimizer: Adam::new((vocab.words.len(), embedding_dim)),
             positional_optimizer: Adam::new((max_seq_len, embedding_dim)),
+            step_mode: false,
+            position: 0,
         }
     }
 
@@ -94,7 +98,25 @@ impl Layer for Embeddings {
         // input shape is [1, sequence_length]
         self.cached_input = Some(input.clone());
         let token_ids: Vec<usize> = input.iter().map(|&x| x as usize).collect();
-        self.embed_tokens(&token_ids) // shape is [sequence_length, embedding_dim]
+        if !self.step_mode || input.ncols() > 1 {
+            // Full-sequence path: position becomes the next decode step's
+            // index (the number of tokens embedded so far).
+            self.position = token_ids.len();
+            return self.embed_tokens(&token_ids); // shape is [sequence_length, embedding_dim]
+        }
+        // Decode step: exactly one new token at the recorded position,
+        // byte-identical to the full-sequence embedding of that row.
+        let token_embed = self.token_embeddings.row(token_ids[0]).to_owned();
+        let position_embed = self.positional_embeddings.row(self.position).to_owned();
+        self.position += 1;
+        (token_embed + position_embed).insert_axis(ndarray::Axis(0))
+    }
+
+    fn set_cache_mode(&mut self, active: bool) {
+        self.step_mode = active;
+        if active {
+            self.position = 0;
+        }
     }
 
     fn backward(&mut self, grads: &Array2<f32>, lr: f32) -> Array2<f32> {

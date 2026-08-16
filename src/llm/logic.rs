@@ -161,6 +161,93 @@ impl LLM {
         output_tokens
     }
 
+    /// Cached decode: prefill fills every block's K/V cache in one pass,
+    /// then each step computes only the newest token's attention row.
+    /// Output is byte-identical to the recompute path (pinned by
+    /// tests/kv_cache_test.rs); this is the throughput lane's decoder.
+    fn forward_cached(&mut self, text: &str) -> Vec<usize> {
+        let mut tokenized = self.tokenize(text);
+        let mut output_tokens: Vec<usize> = Vec::new();
+        if tokenized.is_empty() || tokenized.len() >= self.max_seq_len {
+            return output_tokens;
+        }
+
+        for layer in &mut self.network {
+            layer.set_cache_mode(true);
+        }
+
+        // Prefill caches every prompt position except the last one; the
+        // last prompt token is step 0's input, appended uniformly, so the
+        // cache holds exactly the same rows the recompute path attends to.
+        // A single-token prompt has no prefill: step 0 appends it directly.
+        if tokenized.len() > 1 {
+            let prefill = Array2::from_shape_vec(
+                (1, tokenized.len() - 1),
+                tokenized[..tokenized.len() - 1]
+                    .iter()
+                    .map(|&x| x as f32)
+                    .collect(),
+            )
+            .unwrap();
+            let mut input = prefill;
+            for layer in &mut self.network {
+                input = layer.forward(&input);
+            }
+        }
+
+        for _ in 0..(self.max_seq_len - tokenized.len()) {
+            if output_tokens.len() >= self.max_seq_len - 1 {
+                break;
+            }
+            let step_input = Array2::from_shape_vec(
+                (1, 1),
+                tokenized
+                    .last()
+                    .map(|&x| x as f32)
+                    .into_iter()
+                    .collect(),
+            )
+            .unwrap();
+            let mut input = step_input;
+            for layer in &mut self.network {
+                input = layer.forward(&input);
+            }
+            if input.shape()[0] == 0 {
+                break;
+            }
+            let probs = Self::softmax(&input);
+            let tokens = Self::greedy_decode(&probs);
+            let next_token = tokens[tokens.len() - 1];
+            output_tokens.push(next_token);
+            tokenized.push(next_token);
+            if next_token == self.vocab.encode("</s>").unwrap() {
+                break;
+            }
+        }
+
+        for layer in &mut self.network {
+            layer.set_cache_mode(false);
+        }
+        output_tokens
+    }
+
+    /// Greedy prediction through the cached decode path; identical string
+    /// to `predict`, produced by the KV-cache decoder.
+    pub fn predict_cached(&mut self, text: &str) -> String {
+        let output_tokens = self.forward_cached(text);
+        if output_tokens.is_empty() {
+            if self.tokenize(text).is_empty() {
+                return UNKNOWN_ANSWER.to_string();
+            }
+            return TRUNCATED_ANSWER.to_string();
+        }
+        output_tokens
+            .iter()
+            .map(|t| self.vocab.decode[t].clone())
+            .collect::<Vec<String>>()
+            .join(" ")
+    }
+
     pub fn train(&mut self, data: Vec<&str>, epochs: usize, lr: f32) {
         let _ = self.train_with_progress(data, epochs, lr, false);
     }
