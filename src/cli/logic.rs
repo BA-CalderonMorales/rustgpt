@@ -2,6 +2,7 @@ use super::{Invocation, Mode};
 
 const DEFAULT_SEED: u64 = 42;
 const DEFAULT_EPOCHS: usize = 100;
+const DEFAULT_TEMPERATURE: f32 = 1.0;
 
 fn usage() {
     // The one-line contract: flags first, then exactly one mode.
@@ -33,6 +34,7 @@ fn try_parse() -> Result<Invocation, String> {
     let mut epochs = DEFAULT_EPOCHS;
     let mut tiny = false;
     let mut trace = false;
+    let mut temperature = DEFAULT_TEMPERATURE;
 
     // Consume every argument in order.
     while index < args.len() {
@@ -83,6 +85,15 @@ fn try_parse() -> Result<Invocation, String> {
             }
             "--tiny" => tiny = true,
             "--trace" => trace = true,
+            "--temperature" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--temperature requires a value".to_string())?;
+                index += 1;
+                temperature = value
+                    .parse()
+                    .map_err(|_| format!("invalid temperature: {value}"))?;
+            }
             "--e2e" => {
                 if mode.is_some() {
                     return Err(
@@ -128,11 +139,18 @@ fn try_parse() -> Result<Invocation, String> {
             other => return Err(format!("unknown argument: {other}")),
         }
     }
-
     // Resolve the mode default and the trace restriction.
     let mode = mode.unwrap_or(Mode::Interactive);
     if trace && !matches!(mode, Mode::Interactive) {
         return Err("--trace is only available in interactive mode".to_string());
+    }
+
+    // The temperature knob belongs to the tiny-lane eval formula alone.
+    if temperature != DEFAULT_TEMPERATURE && !(tiny && matches!(mode, Mode::Eval)) {
+        return Err("--temperature requires --tiny --eval".to_string());
+    }
+    if temperature <= 0.0 {
+        return Err("--temperature must be positive".to_string());
     }
 
     // Resolve the seed: machine modes default to 42, interactive draws
@@ -150,6 +168,7 @@ fn try_parse() -> Result<Invocation, String> {
         epochs,
         tiny,
         trace,
+        temperature,
     })
 }
 

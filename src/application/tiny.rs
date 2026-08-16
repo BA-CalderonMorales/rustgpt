@@ -10,7 +10,7 @@ const COLLAPSE_THRESHOLD: f32 = 0.5;
 /// Evaluate the tiny lane's score formula: per-item CE on the held-out
 /// slice, its p10/p50/p90 percentiles, vocab coverage, and a
 /// generation-collapse gate over a fixed-length greedy sample.
-pub(crate) fn tiny_eval(llm: &mut LLM) -> serde_json::Value {
+pub(crate) fn tiny_eval(llm: &mut LLM, temperature: f32) -> serde_json::Value {
     // Per-item teacher-forced CE and vocabulary coverage over the held-out
     // slice (never a training slice).
     let stories = llm::load_jsonl(TINY_HELDOUT);
@@ -28,9 +28,10 @@ pub(crate) fn tiny_eval(llm: &mut LLM) -> serde_json::Value {
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let percentile = |q: usize| sorted[(sorted.len() * q / 100).min(sorted.len() - 1)];
 
-    // The generation-collapse gate over a fixed-length greedy sample.
-    let (repetition_rate, sample_len) = collapse_gate(llm);
-
+    // The generation-collapse gate over a fixed-length sample decoded at
+    // the given temperature (greedy argmax is temperature-invariant, so
+    // the gate number is a pin at every T).
+    let (repetition_rate, sample_len) = collapse_gate(llm, temperature);
     serde_json::json!({
         "source": TINY_HELDOUT,
         "items": stories.len(),
@@ -51,9 +52,9 @@ pub(crate) fn tiny_eval(llm: &mut LLM) -> serde_json::Value {
 
 /// Greedy sample from a fixed starter; rate is the fraction of adjacent
 /// token pairs that are identical (a collapsed model approaches 1.0).
-fn collapse_gate(llm: &mut LLM) -> (f32, usize) {
+fn collapse_gate(llm: &mut LLM, temperature: f32) -> (f32, usize) {
     // Generate the fixed-length sample.
-    let generated = llm.predict_cached("Once upon a time,");
+    let generated = llm.predict_scaled("Once upon a time,", temperature);
     let tokens = llm.tokenize(&generated);
     let sample = &tokens[..tokens.len().min(TINY_SAMPLE_LEN)];
 
@@ -68,7 +69,7 @@ fn collapse_gate(llm: &mut LLM) -> (f32, usize) {
 
 /// `--tiny --eval` prints exactly one JSON object carrying the score
 /// formula; the lane never claims quality without it.
-pub(crate) fn run_tiny_eval(llm: &mut LLM) {
+pub(crate) fn run_tiny_eval(llm: &mut LLM, temperature: f32) {
     // Exactly one JSON object carrying the lane's score formula.
     println!(
         "{}",
@@ -76,7 +77,8 @@ pub(crate) fn run_tiny_eval(llm: &mut LLM) {
             "status": "ok",
             "seed": llm::seed(),
             "total_parameters": llm.total_parameters(),
-            "eval": tiny_eval(llm),
+            "temperature": temperature,
+            "eval": tiny_eval(llm, temperature),
         })
     );
 }

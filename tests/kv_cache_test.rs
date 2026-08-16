@@ -23,6 +23,27 @@ fn synthetic_stories() -> Vec<String> {
         .collect()
 }
 
+fn build_micro() -> LLM {
+    let config = Config::micro();
+    let vocab = Vocab::new(vec!["the", "sun", "was", "warm", "</s>"]);
+    let mut network: Vec<Box<dyn llm::Layer>> = vec![Box::new(llm::Embeddings::with_dims(
+        vocab.clone(),
+        config.embedding_dim,
+        config.max_seq_len,
+    ))];
+    for _ in 0..config.block_count {
+        network.push(Box::new(llm::transformer::TransformerBlock::new(
+            config.embedding_dim,
+            config.hidden_dim,
+        )));
+    }
+    network.push(Box::new(llm::output_projection::OutputProjection::new(
+        config.embedding_dim,
+        vocab.words.len(),
+    )));
+    LLM::with_config(vocab, network, config)
+}
+
 fn build_tiny() -> LLM {
     let texts = synthetic_stories();
     let config = Config::tiny();
@@ -66,6 +87,27 @@ fn cached_decode_is_byte_identical_to_recompute() {
         assert_eq!(
             cached, recomputed,
             "cached decode must be byte-identical for {prompt:?}"
+        );
+    }
+}
+
+#[test]
+fn temperature_scaled_greedy_is_argmax_invariant() {
+    // T=1 must reproduce the greedy contract byte-identically, and every
+    // positive temperature must too: scaling logits before the softmax
+    // preserves the argmax, so the scaled path is a pin at any T. The
+    // micro config keeps the debug-build decode cheap (a 14M random model
+    // would burn ~3 minutes for no extra signal).
+    set_seed(42);
+    let mut model = build_micro();
+    let prompt = "the sun was warm";
+    let greedy = model.predict_cached(prompt);
+    assert_eq!(model.predict_scaled(prompt, 1.0), greedy);
+    for temperature in [0.7, 0.8, 0.9, 1.1, 1.2] {
+        assert_eq!(
+            model.predict_scaled(prompt, temperature),
+            greedy,
+            "argmax must be invariant at T={temperature}"
         );
     }
 }

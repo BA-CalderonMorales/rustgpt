@@ -13,4 +13,5 @@ pub(crate) struct Invocation {
     pub epochs: usize,
     pub tiny: bool,
     pub trace: bool,
+    pub temperature: f32,
 }

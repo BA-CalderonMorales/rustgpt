@@ -221,6 +221,37 @@ fn trace_is_rejected_outside_interactive_mode() {
 }
 
 #[test]
+fn temperature_requires_tiny_eval() {
+    for (arguments, message) in [
+        (
+            vec!["--temperature", "0.8"],
+            "error: --temperature requires --tiny --eval\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--eval", "--temperature", "0.8"],
+            "error: --temperature requires --tiny --eval\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--train", "x.jsonl", "--temperature", "0.8"],
+            "error: --temperature requires --tiny --eval\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--eval", "--temperature", "0"],
+            "error: --temperature must be positive\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--temperature", "abc"],
+            "error: invalid temperature: abc\nTry 'llm --help' for usage.\n",
+        ),
+    ] {
+        let output = run(&arguments, &std::env::temp_dir());
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(stderr(&output), message);
+    }
+}
+
+#[test]
 fn probe_requires_a_checkpoint() {
     let output = run(&["--probe"], Path::new(env!("CARGO_MANIFEST_DIR")));
     assert_eq!(output.status.code(), Some(2));

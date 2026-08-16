@@ -199,7 +199,7 @@ impl LLM {
     /// then each step computes only the newest token's attention row.
     /// Output is byte-identical to the recompute path (pinned by
     /// tests/kv_cache_test.rs); this is the throughput lane's decoder.
-    fn forward_cached(&mut self, text: &str) -> Vec<usize> {
+    fn forward_cached(&mut self, text: &str, temperature: f32) -> Vec<usize> {
         // Tokenize and guard the degenerate prompts, as the recompute path.
         let mut tokenized = self.tokenize(text);
         let mut output_tokens: Vec<usize> = Vec::new();
@@ -251,7 +251,8 @@ impl LLM {
             if input.shape()[0] == 0 {
                 break;
             }
-            let probs = Self::softmax(&input);
+            let scaled = &input * (1.0 / temperature);
+            let probs = Self::softmax(&scaled);
             let tokens = Self::greedy_decode(&probs);
             let next_token = tokens[tokens.len() - 1];
             output_tokens.push(next_token);
@@ -271,7 +272,18 @@ impl LLM {
     /// Greedy prediction through the cached decode path; identical string
     /// to `predict`, produced by the KV-cache decoder.
     pub fn predict_cached(&mut self, text: &str) -> String {
-        let output_tokens = self.forward_cached(text);
+        let output_tokens = self.forward_cached(text, 1.0);
+        self.answer_string(text, &output_tokens)
+    }
+
+    /// Temperature-scaled greedy decode through the cached path: logits are
+    /// divided by `temperature` before the output softmax, then the argmax
+    /// is chosen as usual. Scaling preserves the argmax for any positive T,
+    /// so the token stream is byte-identical to `predict_cached` at every
+    /// temperature (pinned by tests/kv_cache_test.rs); the knob exists so
+    /// the collapse gate can be measured under a peaked output softmax.
+    pub fn predict_scaled(&mut self, text: &str, temperature: f32) -> String {
+        let output_tokens = self.forward_cached(text, temperature);
         self.answer_string(text, &output_tokens)
     }
 

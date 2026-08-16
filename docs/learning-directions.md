@@ -23,6 +23,32 @@ small enough to explain, test, and reverse.
   tiny-lane repetition gate. The temperature sweep (W3) tests the family's
   cheapest member first; a presence-penalty probe is the natural follow-up
   if temperature alone cannot hold the gate below 0.5.
+- **Temperature-scaled greedy, falsified (2026-08-16, W3, seed 42).** Claim:
+  "logits / T before the output softmax moves the tiny-lane collapse-gate
+  repetition rate below 0.5 from the T=1 pin of 1.0, without retraining."
+  Table on models/tinystories/ts-13m-s42.bin (96-token gate, no retrain,
+  recipe: --tiny --eval --seed 42 --temperature <T>):
+
+  | T | repetition rate | collapsed |
+  |---|---|-----------|
+  | 0.7 | 1.0 | true |
+  | 0.8 | 1.0 | true |
+  | 0.9 | 1.0 | true |
+  | 1.0 | 1.0 | true |
+  | 1.1 | 1.0 | true |
+  | 1.2 | 1.0 | true |
+
+  Null confirmed. The mechanism is mathematical, not empirical: scaling
+  logits by a positive constant preserves the softmax argmax, so greedy
+  decode is byte-identical at every T (pinned by the
+  temperature_scaled_greedy_is_argmax_invariant test). Diagnosis: the
+  collapse is NOT a softmax-sharpness artifact and NOT a data-volume
+  problem (demo-slice probe); the remaining decode-time lever is
+  probability-weighted temperature SAMPLING (the mechanism paragraph's
+  intended knob, and Qwen's actual usage); if that fails, the collapse is
+  in the weights (label smoothing / LR decay / weight tying). The
+  `--temperature` knob stays as the gate's instrument: greedy invariance
+  makes any T a pin, which the sampling probe needs as its baseline.
 
 ## Architecture
 
@@ -140,6 +166,36 @@ small enough to explain, test, and reverse.
   deep-memory optimizer at micro scale is a self-contained experiment:
   same-or-better loss at equal steps on the water-cycle recipe.
 
+## Training and Data (the collapse probes)
+
+- **Training budget at the recipe level, falsified (2026-08-16, seed 42).**
+  Claim: "more epochs on the 300-story demo slice breaks the collapse
+  gate." Table (--tiny --train models/tinystories/demo.jsonl --seed 42,
+  constant LR 5e-4):
+
+  | epochs | repetition rate | final loss |
+  |--------|-----------------|------------|
+  | 1 | 1.0 (recites ".") | 5.97 |
+  | 3 | 0.9684 (recites "the") | 5.39 |
+  | 6 | 1.0 | 5.23 |
+  | 12 | 1.0 | 5.37 |
+
+  The collapse is a MOVING frequency-head attractor: at 1 epoch the model
+  latches "." (the punctuation head), at 3-6 epochs it latches "the" (the
+  most common story word; the gate's 3 non-repeating pairs are the
+  "time a a a , , ," transitions). Loss instability at 12 epochs (5.23 ->
+  5.37) with a constant LR shows the recipe cannot simply be trained
+  longer. Three falsified hypotheses now triangulate the collapse: data
+  volume (demo vs 40k, same gate), decode sharpness (temperature
+  invariance), and epoch count at this recipe. CE stays 5.7-7.1 with
+  coverage 1.0 while generation is fully degenerate: teacher-forced CE is
+  blind to the collapse. The untested levers, in order: LR decay (the
+  recipe is provably unstable without it), probability-weighted sampling
+  and a repetition penalty (decode-time), label smoothing (calibration),
+  and a continuous logit profile (top-1 margin / output entropy per
+  epoch) as the instrument that makes collapse onset visible -- the
+  boolean gate cannot see the regime structure.
+
 ## Training and Data (free-compute lane)
 
 - **The pristine-data probe on a clean slice (2026-08-16, seed 42).** The
@@ -162,6 +218,17 @@ small enough to explain, test, and reverse.
 - Measure before changing implementation details.
 - Explore parallelism, allocation behavior, or SIMD as isolated experiments.
 - Record the readability cost of each optimization alongside its benchmark.
+- **BLAS probe, blocked by environment (2026-08-16, W5).** Attempted the
+  README-of-record change: optional `blas` feature (openblas-src). This
+  WSL2 image has no gfortran (source build impossible) and
+  `libopenblas-dev` (0.3.32 available in apt) requires interactive sudo,
+  unavailable headless. Cargo.toml default features untouched; no
+  half-wired feature flag merged. The clean next attempt is the W4 cloud
+  path: Colab/Kaggle shell sessions have passwordless sudo, so
+  `apt-get install -y libopenblas-dev` + `openblas-src` with the `system`
+  feature (no gfortran) is the documented first move there; a measured
+  >=2x matmul win earns the ADR. Until the roofline moves, the
+  batched-training falsification stands.
 - **KV-cache decode, landed (2026-08-16, E4).** `Layer::set_cache_mode`
   seam (embeddings position cursor; blocks forward to their attention;
   preallocated doubling K/V buffers); prefill excludes the last prompt

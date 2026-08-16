@@ -95,6 +95,19 @@ gate. The same block ships as `eval` inside every `--tiny --train` output.
 score. The held-out slice (split seed 20260816) is carved by
 `scripts/slice_tinystories.py` and never appears in a training slice.
 
+### The temperature knob
+
+```bash
+cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin --temperature 0.8
+```
+
+`--temperature <t>` (default 1.0, `--tiny --eval` only, exit 2 otherwise)
+scales the output softmax logits by `1/t` in the gate's greedy decode. The
+greedy argmax is temperature-invariant, so the gate number is a pin at
+every T; the knob exists so the collapse gate can be measured under a
+peaked softmax and gives the probability-weighted sampling probe its
+baseline (see docs/learning-directions.md, W3 verdict).
+
 ## Development Commands
 
 ```bash

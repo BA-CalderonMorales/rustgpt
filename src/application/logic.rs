@@ -153,7 +153,7 @@ pub(crate) fn run_headless(invocation: &Invocation, dataset: &Dataset, llm: &mut
         }
         Mode::Eval => {
             if invocation.tiny {
-                crate::application::run_tiny_eval(llm);
+                crate::application::run_tiny_eval(llm, invocation.temperature);
             } else {
                 run_training_and_eval(dataset, llm, invocation.model.as_deref());
             }
@@ -226,7 +226,7 @@ fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: 
             "epochs": epochs,
             "trajectory": { "loss": losses },
             "samples": samples,
-            "eval": crate::application::tiny_eval(llm),
+            "eval": crate::application::tiny_eval(llm, 1.0),
         })
     );
 }
