@@ -131,6 +131,24 @@ cargo test --all-targets
 cargo build --release
 ```
 
+## OneDrive-Backed Checkouts
+
+A checkout inside a OneDrive-synced directory (for example under
+`/mnt/c/Users/<user>/OneDrive/`) pays a per-file I/O tax on every build:
+measured on this machine, an incremental release rebuild takes 14.1s on
+the OneDrive mount versus 5.9s on an ext4 directory (2.4x), with the
+sync client additionally uploading `target/` to the cloud. If builds
+feel slow, point Cargo's output at an ext4 directory instead:
+
+```bash
+export CARGO_TARGET_DIR=~/projects/rustgpt-target
+cargo build --release   # artifacts now live outside the mount
+```
+
+The binary behaves identically (same source, same compiler); the repo
+keeps no `target/` artifacts when the variable is set. The workaround is
+documented here because the mount's latency is invisible until measured.
+
 To inspect output from a particular integration test:
 
 ```bash

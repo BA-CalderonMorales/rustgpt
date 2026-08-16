@@ -2,6 +2,10 @@
 # Every recipe runs the exact commands documented in
 # docs/running-and-development.md and pinned by the Verify gates in AGENTS.md.
 # Run from the repository root.
+#
+# OneDrive-backed checkout? Export CARGO_TARGET_DIR to an ext4 directory
+# first (e.g. ~/projects/rustgpt-target) -- measured 2.4x faster builds;
+# see the OneDrive note in docs/running-and-development.md.
 
 # The verification gates, in order (the e2e contract probe is its own target).
 .PHONY: fmt clippy test verify
