@@ -164,6 +164,34 @@ fn eval_rejects_bad_seed_arguments() {
 }
 
 #[test]
+fn tiny_eval_requires_a_checkpoint() {
+    let output = run(
+        &["--tiny", "--eval"],
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: --tiny requires --model <checkpoint> or --train <file.jsonl>\n"
+    );
+}
+
+#[test]
+fn missing_checkpoint_is_an_error_not_a_silent_fallback() {
+    let output = run(
+        &["--model", "does-not-exist.bin", "--e2e", "hello"],
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: checkpoint not found: does-not-exist.bin\n"
+    );
+}
+
+#[test]
 fn eval_and_e2e_are_mutually_exclusive() {
     let output = run(&["--eval", "--e2e", "hi"], &std::env::temp_dir());
     assert_eq!(output.status.code(), Some(2));

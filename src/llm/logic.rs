@@ -351,6 +351,31 @@ impl LLM {
         tokens
     }
 
+    /// Number of whitespace/punctuation tokens `text` splits into, counting
+    /// words outside the vocabulary. `tokenize` silently drops out-of-vocab
+    /// words, so eval coverage is `tokenize(text).len() / raw_token_count(text)`.
+    pub fn raw_token_count(&self, text: &str) -> usize {
+        let mut count = 0usize;
+        for word in text.split_whitespace() {
+            let mut current = String::new();
+            for c in word.chars() {
+                if c.is_ascii_punctuation() {
+                    if !current.is_empty() {
+                        count += 1;
+                        current.clear();
+                    }
+                    count += 1;
+                } else {
+                    current.push(c);
+                }
+            }
+            if !current.is_empty() {
+                count += 1;
+            }
+        }
+        count
+    }
+
     fn softmax(logits: &Array2<f32>) -> Array2<f32> {
         // logits is seq_len x vocab_size
         let mut result = logits.clone();

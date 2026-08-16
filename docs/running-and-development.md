@@ -73,11 +73,27 @@ cargo run --release -- --model models/mine.bin --e2e "hello world"
 
 `--model <path>` loads the checkpoint when the file exists; training modes
 (`--eval`, interactive) then re-save it after training, creating parent
-directories as needed. Checkpoints are format v1 (`RGPT_V1` magic header):
-the seed, the vocabulary, and each layer's learned weights. Optimizer state
-and transient caches are never stored, so a loaded model starts with fresh
+directories as needed. A missing checkpoint is an error (exit 1) except as
+the first-run save target of `--train`; it never silently falls back to a
+fresh model. Checkpoints are format v2 (`RGPT_V2` magic header): the seed,
+the vocabulary, and each layer's learned weights. Optimizer state and
+transient caches are never stored, so a loaded model starts with fresh
 optimizers. Checkpoints live under `models/` (gitignored); a result is
 reproducible as the pair (checkpoint or seed) plus its eval JSON.
+
+## Tiny-Lane Evaluation
+
+```bash
+cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin
+```
+
+The tiny lane's score formula (see `docs/dataset-curation.md`): per-item
+teacher-forced CE over `models/tinystories/heldout.jsonl`, nearest-rank
+p10/p50/p90 percentiles, vocabulary coverage, and the generation-collapse
+gate. The same block ships as `eval` inside every `--tiny --train` output.
+`--tiny --eval` requires `--model`; without a checkpoint there is nothing to
+score. The held-out slice (split seed 20260816) is carved by
+`scripts/slice_tinystories.py` and never appears in a training slice.
 
 ## Development Commands
 

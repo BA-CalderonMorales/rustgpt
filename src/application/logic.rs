@@ -38,14 +38,20 @@ pub(crate) fn build_llm(
     train_path: Option<&str>,
     tiny: bool,
 ) -> LLM {
-    if let Some(path) = model_path
-        && std::path::Path::new(path).exists()
-    {
-        eprintln!("Loading checkpoint {path}");
-        return llm::load(path).unwrap_or_else(|error| {
-            eprintln!("error: failed to load checkpoint {path}: {error}");
+    if let Some(path) = model_path {
+        if std::path::Path::new(path).exists() {
+            eprintln!("Loading checkpoint {path}");
+            return llm::load(path).unwrap_or_else(|error| {
+                eprintln!("error: failed to load checkpoint {path}: {error}");
+                std::process::exit(1);
+            });
+        }
+        // A missing checkpoint is only acceptable as a first-run target for
+        // --train; any other mode must not silently fall back to a fresh model.
+        if train_path.is_none() {
+            eprintln!("error: checkpoint not found: {path}");
             std::process::exit(1);
-        });
+        }
     }
     if let Some(path) = train_path {
         if !tiny {
@@ -56,6 +62,10 @@ pub(crate) fn build_llm(
         }
         let texts = llm::load_jsonl(path);
         return build_tiny_llm(&texts);
+    }
+    if tiny {
+        eprintln!("error: --tiny requires --model <checkpoint> or --train <file.jsonl>");
+        std::process::exit(2);
     }
     build_model(dataset)
 }
@@ -120,7 +130,13 @@ pub(crate) fn build_model(dataset: &Dataset) -> LLM {
 pub(crate) fn run(invocation: Invocation, dataset: &Dataset, llm: &mut LLM) {
     match invocation.mode {
         Mode::E2e { prompt } => run_e2e(prompt, llm),
-        Mode::Eval => run_training_and_eval(dataset, llm, invocation.model.as_deref()),
+        Mode::Eval => {
+            if invocation.tiny {
+                crate::application::run_tiny_eval(llm);
+            } else {
+                run_training_and_eval(dataset, llm, invocation.model.as_deref());
+            }
+        }
         Mode::Train { path } => {
             run_training_lm(&path, llm, invocation.model.as_deref(), invocation.epochs)
         }
@@ -169,6 +185,7 @@ fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: 
             "epochs": epochs,
             "trajectory": { "loss": losses },
             "samples": samples,
+            "eval": crate::application::tiny_eval(llm),
         })
     );
 }

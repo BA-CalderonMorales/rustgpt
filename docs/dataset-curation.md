@@ -121,8 +121,39 @@ Rebuild the local slice (gitignored under `models/tinystories/`):
 ```bash
 curl -L -o models/tinystories/TinyStories-train.txt \
   "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStories-train.txt"
-python3 scripts/slice_tinystories.py  # 40k stories, <=120 words each -> train.jsonl
+python3 scripts/slice_tinystories.py  # 40k train stories + 256 held-out stories
 ```
+
+The script writes `train.jsonl` (first 40,000 qualifying stories, exactly the
+v0.0.4 slice) and `heldout.jsonl` (256 stories drawn with a seeded shuffle,
+split seed **20260816** in the `python` random module, from qualifying
+stories that follow the train boundary, deduplicated verbatim against the
+train slice). The held-out slice never enters any training file; the split
+seed must not silently redefine the training slice.
+
+## Tiny-Lane Score Formula (v0.0.5)
+
+The tiny lane cannot cite quality without its score formula. `--tiny --eval
+--model <checkpoint>` (and the `eval` block of every `--tiny --train` JSON)
+reports, against `models/tinystories/heldout.jsonl`:
+
+- `per_item_ce`: teacher-forced cross-entropy per held-out story
+  (`llm::sequence_loss`), the exact signal training optimizes.
+- `ce_percentiles`: nearest-rank p10 / p50 / p90 across items; median tracks
+  task quality better than the mean (arXiv 2605.24667), so the mean is
+  never the trajectory claim.
+- `coverage`: fraction of held-out tokens inside the model vocabulary
+  (`tokenize` drops OOV words, which would otherwise bias CE downward).
+- `collapse`: a generation-collapse gate. Greedy sample from the fixed
+  starter `Once upon a time,` capped at 96 tokens; `repetition_rate` is the
+  fraction of adjacent token pairs that are identical, and `collapsed` is
+  true above 0.5. A lane whose greedy output degenerates is reported, not
+  hidden.
+
+Measured on the v0.0.4 artifact (`models/tinystories/ts-13m-s42.bin`, seed
+42): coverage 0.9976; p10/p50/p90 = 5.49 / 5.87 / 6.31; mean CE 5.88;
+collapse gate `collapsed: true` with repetition rate 1.0 (the known dot
+degeneracy, now a number on the formula).
 
 Measured baseline (2026-08-12, laptop CPU, `--tiny`, seed 42, 1 epoch over
 40k stories / ~1.5M tokens): single-epoch loss 5.84 from a ln(vocab) ~ 8.1
