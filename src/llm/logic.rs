@@ -3,6 +3,13 @@ use std::cmp::Ordering;
 use ndarray::{Array1, Array2, Axis};
 
 use super::{AnswerScore, LLM, Layer};
+
+/// Literal answer for prompts whose tokens are all outside the vocabulary.
+/// The CLI contract pins this string: out-of-vocabulary input must never
+/// produce a silent empty output with status:ok.
+pub const UNKNOWN_ANSWER: &str = "Assistant : I do not know that word . </s>";
+/// Literal answer for prompts that exceed the model's sequence limit.
+const TRUNCATED_ANSWER: &str = "Assistant : The input is too long . </s>";
 use crate::{
     EMBEDDING_DIM, Embeddings, HIDDEN_DIM, MAX_SEQ_LEN, Vocab, output_projection::OutputProjection,
     transformer::TransformerBlock,
@@ -69,9 +76,14 @@ impl LLM {
     pub fn predict(&mut self, text: &str) -> String {
         let output_tokens = self.forward(text);
 
-        // Handle empty output
+        // Handle empty output: an explicit report, never a silent empty
+        // string. A prompt with no in-vocabulary token gets the unknown-word
+        // answer; an over-long prompt gets the truncation answer.
         if output_tokens.is_empty() {
-            return String::new();
+            if self.tokenize(text).is_empty() {
+                return UNKNOWN_ANSWER.to_string();
+            }
+            return TRUNCATED_ANSWER.to_string();
         }
 
         // Convert token_ids to strings

@@ -111,6 +111,40 @@ fn e2e_emits_one_json_line_with_the_public_schema() {
 }
 
 #[test]
+fn e2e_oov_prompt_returns_explicit_fallback_not_silent_empty() {
+    // "zzzzzz" is outside the water-cycle vocabulary; the contract demands
+    // an explicit, non-empty answer instead of "" with status:ok.
+    let output = run(&["--e2e", "zzzzzz"], Path::new(env!("CARGO_MANIFEST_DIR")));
+
+    assert_eq!(output.status.code(), Some(0));
+    let response: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim_end()).expect("one JSON object");
+    assert_eq!(response["status"].as_str(), Some("ok"));
+    assert_eq!(
+        response["output"].as_str(),
+        Some("Assistant : I do not know that word . </s>")
+    );
+}
+
+#[test]
+fn e2e_overlong_prompt_returns_explicit_truncation_report() {
+    let long_prompt = "hello world ".repeat(200);
+    let output = run(
+        &["--e2e", long_prompt.trim_end()],
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let response: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim_end()).expect("one JSON object");
+    assert_eq!(response["status"].as_str(), Some("ok"));
+    assert_eq!(
+        response["output"].as_str(),
+        Some("Assistant : The input is too long . </s>")
+    );
+}
+
+#[test]
 fn eval_rejects_bad_seed_arguments() {
     for (arguments, message) in [
         (
@@ -206,6 +240,20 @@ fn e2e_with_checkpoint_loads_and_serves_the_saved_model() {
         serde_json::from_str(stdout(&output).trim_end()).expect("one JSON object");
     assert_eq!(response["status"].as_str(), Some("ok"));
     assert_eq!(response["total_parameters"].as_u64(), Some(380_893));
+
+    let oov = run(
+        &["--model", path.to_str().unwrap(), "--e2e", "zzzzzz"],
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+    assert_eq!(oov.status.code(), Some(0));
+    let response: serde_json::Value =
+        serde_json::from_str(stdout(&oov).trim_end()).expect("one JSON object");
+    assert_eq!(response["status"].as_str(), Some("ok"));
+    assert!(
+        response["output"]
+            .as_str()
+            .is_some_and(|output| !output.is_empty())
+    );
 
     std::fs::remove_dir_all(checkpoint_dir).ok();
 }
