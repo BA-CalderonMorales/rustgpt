@@ -13,6 +13,7 @@ fn heldout() -> Vec<(String, String)> {
 }
 
 fn greedy_summary(llm: &mut LLM) -> serde_json::Value {
+    // Greedy decode over every held-out item.
     let mut exact_total = 0usize;
     let mut prefix_total = 0usize;
     let mut accuracies = Vec::new();
@@ -22,6 +23,7 @@ fn greedy_summary(llm: &mut LLM) -> serde_json::Value {
         prefix_total += usize::from(score.prefix);
         accuracies.push(score.accuracy);
     }
+
     serde_json::json!({
         "exact_matches": exact_total,
         "prefix_matches": prefix_total,
@@ -33,6 +35,8 @@ fn greedy_summary(llm: &mut LLM) -> serde_json::Value {
 /// best-scoring candidate wins per position (arXiv 2408.03314). Item 3's
 /// loop-free candidate count is the degeneracy recovery report.
 fn best_of_n_cell(llm: &mut LLM, k: usize, n: usize, rng: &mut Xorshift) -> serde_json::Value {
+    // One (k, N) cell: N seeded top-k candidates per held-out item, the
+    // best-scoring candidate wins per position (arXiv 2408.03314).
     let mut exact_total = 0usize;
     let mut prefix_total = 0usize;
     let mut accuracies = Vec::new();
@@ -55,6 +59,7 @@ fn best_of_n_cell(llm: &mut LLM, k: usize, n: usize, rng: &mut Xorshift) -> serd
         prefix_total += usize::from(best.prefix);
         accuracies.push(best.accuracy);
     }
+
     serde_json::json!({
         "exact_matches": exact_total,
         "prefix_matches": prefix_total,
@@ -66,16 +71,19 @@ fn best_of_n_cell(llm: &mut LLM, k: usize, n: usize, rng: &mut Xorshift) -> serd
 /// `--probe --model <checkpoint>`: the decode-time compute truth table
 /// (k x N grid against greedy), exactly one JSON object on stdout.
 pub(crate) fn run_probe(llm: &mut LLM) {
+    // Draw the probe chain from a seed offset that never shares a chain
+    // with the property suite's prompt generator.
     let mut rng = Xorshift::new(llm::seed() ^ PROBE_SEED_OFFSET);
+
+    // Sweep the (k, N) grid.
     let mut grid = serde_json::Map::new();
     for k in K_VALUES {
         for n in N_VALUES {
-            grid.insert(
-                format!("k{k}_n{n}"),
-                best_of_n_cell(llm, k, n, &mut rng),
-            );
+            grid.insert(format!("k{k}_n{n}"), best_of_n_cell(llm, k, n, &mut rng));
         }
     }
+
+    // Exactly one JSON object: greedy baseline plus the truth table.
     println!(
         "{}",
         serde_json::json!({

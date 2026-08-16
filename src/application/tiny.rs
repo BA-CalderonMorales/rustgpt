@@ -11,6 +11,8 @@ const COLLAPSE_THRESHOLD: f32 = 0.5;
 /// slice, its p10/p50/p90 percentiles, vocab coverage, and a
 /// generation-collapse gate over a fixed-length greedy sample.
 pub(crate) fn tiny_eval(llm: &mut LLM) -> serde_json::Value {
+    // Per-item teacher-forced CE and vocabulary coverage over the held-out
+    // slice (never a training slice).
     let stories = llm::load_jsonl(TINY_HELDOUT);
     let mut per_item_ce = Vec::with_capacity(stories.len());
     let mut in_vocab = 0usize;
@@ -21,11 +23,14 @@ pub(crate) fn tiny_eval(llm: &mut LLM) -> serde_json::Value {
         raw_total += llm.raw_token_count(story);
     }
 
+    // Nearest-rank CE percentiles.
     let mut sorted = per_item_ce.clone();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let percentile = |q: usize| sorted[(sorted.len() * q / 100).min(sorted.len() - 1)];
 
+    // The generation-collapse gate over a fixed-length greedy sample.
     let (repetition_rate, sample_len) = collapse_gate(llm);
+
     serde_json::json!({
         "source": TINY_HELDOUT,
         "items": stories.len(),
@@ -47,9 +52,12 @@ pub(crate) fn tiny_eval(llm: &mut LLM) -> serde_json::Value {
 /// Greedy sample from a fixed starter; rate is the fraction of adjacent
 /// token pairs that are identical (a collapsed model approaches 1.0).
 fn collapse_gate(llm: &mut LLM) -> (f32, usize) {
+    // Generate the fixed-length sample.
     let generated = llm.predict_cached("Once upon a time,");
     let tokens = llm.tokenize(&generated);
     let sample = &tokens[..tokens.len().min(TINY_SAMPLE_LEN)];
+
+    // Rate identical adjacent pairs over the sampled length.
     let repeats = sample
         .windows(2)
         .filter(|window| window[0] == window[1])
@@ -61,6 +69,7 @@ fn collapse_gate(llm: &mut LLM) -> (f32, usize) {
 /// `--tiny --eval` prints exactly one JSON object carrying the score
 /// formula; the lane never claims quality without it.
 pub(crate) fn run_tiny_eval(llm: &mut LLM) {
+    // Exactly one JSON object carrying the lane's score formula.
     println!(
         "{}",
         serde_json::json!({

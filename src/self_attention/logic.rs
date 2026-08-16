@@ -47,12 +47,11 @@ impl SelfAttention {
     }
 
     fn attention(&self, q: &Array2<f32>, k: &Array2<f32>, v: &Array2<f32>) -> Array2<f32> {
+        // Scaled dot-product scores, then causal masking: no attention to
+        // future tokens.
         let dk = (self.embedding_dim as f32).sqrt();
-
         let k_t = k.t();
         let mut scores = q.dot(&k_t) / dk;
-
-        // Apply causal masking - prevent attention to future tokens
         let seq_len = scores.shape()[0];
         for i in 0..seq_len {
             for j in (i + 1)..seq_len {
@@ -60,6 +59,7 @@ impl SelfAttention {
             }
         }
 
+        // Softmax weights applied to the values.
         let weights = self.softmax(&scores);
         weights.dot(v)
     }
@@ -120,12 +120,15 @@ impl Layer for SelfAttention {
     }
 
     fn forward(&mut self, input: &Array2<f32>) -> Array2<f32> {
+        // Cache the input, then take the recompute path unless decode
+        // caching is active.
         self.cached_input = Some(input.clone());
         if !self.step_mode {
             let qkv = self.compute_qkv(input);
             let attention = self.attention(&qkv.0, &qkv.1, &qkv.2);
-            return attention + input; // residual connection (no LayerNorm here)
+            return attention + input;
         }
+
         // Decode path: append this position's K/V, then attend against the
         // growing cache. The prefill call (full input) fills the cache and
         // produces scores identical to the uncached path; step calls (one
@@ -139,12 +142,8 @@ impl Layer for SelfAttention {
                 let capacity = input.nrows().max(1) * 2;
                 let mut cache_k = Array2::zeros((capacity, self.embedding_dim));
                 let mut cache_v = Array2::zeros((capacity, self.embedding_dim));
-                cache_k
-                    .slice_mut(s![..input.nrows(), ..])
-                    .assign(&k);
-                cache_v
-                    .slice_mut(s![..input.nrows(), ..])
-                    .assign(&v);
+                cache_k.slice_mut(s![..input.nrows(), ..]).assign(&k);
+                cache_v.slice_mut(s![..input.nrows(), ..]).assign(&v);
                 self.kv_cache = Some((cache_k, cache_v, input.nrows()));
             }
             Some((cache_k, cache_v, filled)) => {
@@ -157,11 +156,16 @@ impl Layer for SelfAttention {
                     *cache_k = bigger_k;
                     *cache_v = bigger_v;
                 }
-                cache_k.slice_mut(s![*filled..*filled + input.nrows(), ..]).assign(&k);
-                cache_v.slice_mut(s![*filled..*filled + input.nrows(), ..]).assign(&v);
+                cache_k
+                    .slice_mut(s![*filled..*filled + input.nrows(), ..])
+                    .assign(&k);
+                cache_v
+                    .slice_mut(s![*filled..*filled + input.nrows(), ..])
+                    .assign(&v);
                 *filled += input.nrows();
             }
         }
+        // Attend the newest query against the full cache, masked and softmaxed.
         let (cache_k, cache_v, filled) = self.kv_cache.as_ref().expect("kv cache filled");
         let dk = (self.embedding_dim as f32).sqrt();
         let k_view = cache_k.slice(s![..*filled, ..]);
@@ -174,6 +178,7 @@ impl Layer for SelfAttention {
             }
         }
         let weights = self.softmax(&scores);
+
         weights.dot(&v_view) + input
     }
 
@@ -185,49 +190,46 @@ impl Layer for SelfAttention {
     }
 
     fn backward(&mut self, grads: &Array2<f32>, lr: f32) -> Array2<f32> {
+        // Recompute the forward projections from the cached input.
         let input = self.cached_input.as_ref().unwrap();
         let q = input.dot(&self.w_q);
         let k = input.dot(&self.w_k);
         let v = input.dot(&self.w_v);
         let scale = (self.embedding_dim as f32).sqrt();
 
+        // Masked, softmaxed attention weights, as in forward.
         let mut scores = q.dot(&k.t()) / scale;
-
-        // Apply causal masking - prevent attention to future tokens
         let seq_len = scores.shape()[0];
         for i in 0..seq_len {
             for j in (i + 1)..seq_len {
                 scores[[i, j]] = f32::NEG_INFINITY;
             }
         }
+        let attn_weights = self.softmax(&scores);
 
-        let attn_weights = self.softmax(&scores); // also cached
-
-        // Step 1: grads = ∂L/∂attn_output
+        // Step 1: gradients through the output projection.
         let grad_attn_weights = grads.dot(&v.t());
         let grad_v = attn_weights.t().dot(grads);
 
-        // Step 2: softmax backward
-        let grad_scores = SelfAttention::softmax_backward(&attn_weights, &grad_attn_weights); // [seq_len, seq_len]
+        // Step 2: softmax backward.
+        let grad_scores = SelfAttention::softmax_backward(&attn_weights, &grad_attn_weights);
 
-        // Step 3: ∂L/∂Q and ∂L/∂K
+        // Step 3: gradients w.r.t. the query and key rows.
         let grad_q = grad_scores.dot(&k) / scale;
         let grad_k = grad_scores.t().dot(&q) / scale;
 
-        // Step 4: ∂L/∂W_q/W_k/W_v
+        // Step 4: gradients w.r.t. the weight matrices.
         let grad_w_q = input.t().dot(&grad_q);
         let grad_w_k = input.t().dot(&grad_k);
         let grad_w_v = input.t().dot(&grad_v);
 
-        // Step 5: ∂L/∂input (gradient through attention computation)
-        let grad_input_attention =
-            grad_q.dot(&self.w_q.t()) + grad_k.dot(&self.w_k.t()) + grad_v.dot(&self.w_v.t());
+        // Step 5-6: gradient back to the input, plus the residual copy.
+        let grad_input = grad_q.dot(&self.w_q.t())
+            + grad_k.dot(&self.w_k.t())
+            + grad_v.dot(&self.w_v.t())
+            + grads;
 
-        // Step 6: Add gradient from residual connection
-        // Forward: residual = attention + input, so gradient flows directly through
-        let grad_input = grad_input_attention + grads;
-
-        // Step 7: update weights
+        // Step 7: update every weight matrix.
         self.optimizer_w_q.step(&mut self.w_q, &grad_w_q, lr);
         self.optimizer_w_k.step(&mut self.w_k, &grad_w_k, lr);
         self.optimizer_w_v.step(&mut self.w_v, &grad_w_v, lr);

@@ -42,16 +42,16 @@ impl Vocab {
 
     /// Process text data to extract vocabulary words and add them to the vocabulary set
     pub fn process_text_for_vocab(texts: &[String], vocab_set: &mut HashSet<String>) {
-        // Add end of sequence token
+        // Reserved tokens: the end-of-sequence marker, and the unknown-word
+        // token so the model can see what it does not know instead of
+        // silently dropping it.
         vocab_set.insert("</s>".to_string());
-        // Add the unknown-word token so the model can see what it does not
-        // know instead of silently dropping it.
         vocab_set.insert("<unk>".to_string());
 
-        // Process all training examples for vocabulary
+        // Split every word into its alphabetic core and punctuation pieces,
+        // adding each piece to the vocabulary.
         for text in texts {
             for word in text.split_whitespace() {
-                // Handle punctuation by splitting it from words
                 let mut current = String::new();
                 for c in word.chars() {
                     if c.is_ascii_punctuation() {

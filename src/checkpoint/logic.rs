@@ -25,6 +25,7 @@ struct CheckpointData {
 
 /// Persist the model's trained weights to `path`.
 pub fn save(llm: &LLM, path: &str) -> std::io::Result<()> {
+    // Serialize every layer's learned weights by name.
     let mut layers = Vec::new();
     for layer in &llm.network {
         layers.push((
@@ -33,6 +34,7 @@ pub fn save(llm: &LLM, path: &str) -> std::io::Result<()> {
         ));
     }
 
+    // Package the full model state: seed, vocab, config, weights.
     let data = CheckpointData {
         seed: seed(),
         vocab: llm.vocab.words.clone(),
@@ -40,9 +42,9 @@ pub fn save(llm: &LLM, path: &str) -> std::io::Result<()> {
         layers,
     };
 
+    // Magic header, then the bincode payload, written to disk.
     let mut bytes = MAGIC.to_vec();
     bytes.extend(encode_to_vec(&data, standard()).map_err(std::io::Error::other)?);
-
     if let Some(parent) = std::path::Path::new(path).parent()
         && !parent.as_os_str().is_empty()
     {
@@ -56,18 +58,20 @@ pub fn save(llm: &LLM, path: &str) -> std::io::Result<()> {
 /// The vocab and layer shapes are rebuilt from the checkpoint itself; the
 /// caller's current seed only shapes the discarded initial weights.
 pub fn load(path: &str) -> std::io::Result<LLM> {
+    // Read and verify the magic header, then decode the payload.
     let bytes = std::fs::read(path)?;
     if !bytes.starts_with(MAGIC) {
         return Err(std::io::Error::other("not a rustgpt checkpoint"));
     }
-
     let data: CheckpointData = decode_from_slice(&bytes[MAGIC.len()..], standard())
         .map_err(std::io::Error::other)?
         .0;
 
+    // Rebuild the vocabulary from the checkpoint itself.
     let vocab_words_refs: Vec<&str> = data.vocab.iter().map(String::as_str).collect();
     let vocab = Vocab::new(vocab_words_refs);
 
+    // Rebuild the network skeleton from the saved config.
     let mut network: Vec<Box<dyn Layer>> = vec![Box::new(Embeddings::with_dims(
         vocab.clone(),
         data.config.embedding_dim,
@@ -84,6 +88,7 @@ pub fn load(path: &str) -> std::io::Result<LLM> {
         vocab.words.len(),
     )));
 
+    // Restore each layer's weights, guarding type and count mismatches.
     if network.len() != data.layers.len() {
         return Err(std::io::Error::other("checkpoint layer count mismatch"));
     }

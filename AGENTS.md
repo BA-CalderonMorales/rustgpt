@@ -80,6 +80,14 @@ the "game" is the math itself:
   paths (`crate::llm::*`), never loose files at the `src/` root. New files
   target 120 lines or fewer; growing past is a signal to split, never a
   reason to keep writing. Splits are pure moves: no logic changes in a split.
+- **Block-shaped functions.** Shape every function as blank-line-separated
+  logical blocks, each block headed by a one-line comment ("what this block
+  does"); leave a blank line after the opening brace and before the closing
+  brace. The blank lines are the map: related statements stay together,
+  unrelated ones get whitespace, and a function reads like an outline.
+  Dispatch matches (choosing which call to make) use brace arms; trivial
+  data-mapping arms may stay one-line. This layout is author-owned —
+  rustfmt aligns but never enforces it, so preserve it when you edit.
 - **No early abstraction.** Duplicate plainly before abstracting prematurely.
   Boring beats novel. If a reader needs a comment to understand the
   structure, split the file. Delete before adding.

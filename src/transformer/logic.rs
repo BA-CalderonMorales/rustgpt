@@ -27,26 +27,21 @@ impl Layer for TransformerBlock {
     }
 
     fn forward(&mut self, input: &Array2<f32>) -> Array2<f32> {
-        // Standard Transformer architecture: attention + norm -> feedforward + norm
-        let attention_out = self.attention.forward(input); // includes residual
+        // Self-attention with residual, then normalize.
+        let attention_out = self.attention.forward(input);
         let norm1_out = self.norm1.normalize(&attention_out);
 
-        let feed_forward_out = self.feed_forward.forward(&norm1_out); // includes residual
-
+        // Feed-forward with residual, then normalize.
+        let feed_forward_out = self.feed_forward.forward(&norm1_out);
         self.norm2.normalize(&feed_forward_out)
     }
 
     fn backward(&mut self, grads: &Array2<f32>, lr: f32) -> Array2<f32> {
-        // Backward through second LayerNorm
+        // Backward through the second norm and the feed-forward (residual
+        // included), then the first norm and attention (residual included).
         let grad_norm2 = self.norm2.backward(grads, lr);
-
-        // Backward through feed-forward (includes residual connection)
         let grad_ffn = self.feed_forward.backward(&grad_norm2, lr);
-
-        // Backward through first LayerNorm
         let grad_norm1 = self.norm1.backward(&grad_ffn, lr);
-
-        // Backward through attention (includes residual connection)
 
         self.attention.backward(&grad_norm1, lr)
     }

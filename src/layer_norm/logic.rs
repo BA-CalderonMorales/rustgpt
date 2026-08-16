@@ -24,14 +24,16 @@ impl LayerNorm {
     }
 
     pub fn normalize(&mut self, input: &Array2<f32>) -> Array2<f32> {
-        let mean = input.mean_axis(Axis(1)).unwrap().insert_axis(Axis(1)); // Mean per token
-        let std = input.std_axis(Axis(1), 0.0).insert_axis(Axis(1)); // Std per token
+        // Per-token mean and standard deviation.
+        let mean = input.mean_axis(Axis(1)).unwrap().insert_axis(Axis(1));
+        let std = input.std_axis(Axis(1), 0.0).insert_axis(Axis(1));
 
-        // Cache values for backward pass
+        // Cache the input and statistics for the backward pass.
         self.cached_input = Some(input.clone());
         self.cached_mean = Some(mean.clone());
         self.cached_std = Some(std.clone());
 
+        // Normalize, then scale and shift by the learnable parameters.
         let normalized = (input - &mean) / (&std + self.epsilon);
         &self.gamma * &normalized + &self.beta
     }
@@ -47,21 +49,19 @@ impl Layer for LayerNorm {
     }
 
     fn backward(&mut self, grads: &Array2<f32>, lr: f32) -> Array2<f32> {
+        // Restore the cached forward state.
         let input = self.cached_input.as_ref().unwrap();
         let mean = self.cached_mean.as_ref().unwrap();
         let std = self.cached_std.as_ref().unwrap();
-
         let normalized = (input - mean) / (std + self.epsilon);
-        let n_features = input.shape()[1] as f32; // Number of features per token
+        let n_features = input.shape()[1] as f32;
 
-        // Gradients w.r.t. gamma and beta
+        // Gradients w.r.t. the learnable scale and shift.
         let grad_gamma = (&normalized * grads).sum_axis(Axis(0)).insert_axis(Axis(0));
         let grad_beta = grads.sum_axis(Axis(0)).insert_axis(Axis(0));
-
-        // Gradient w.r.t. normalized values
         let grad_normalized = &self.gamma * grads;
 
-        // LayerNorm backward pass with full chain rule
+        // Full chain rule back through variance and mean.
         let grad_input = {
             let variance = std * std + self.epsilon;
             let grad_var = (&grad_normalized * &normalized)
@@ -79,7 +79,7 @@ impl Layer for LayerNorm {
                 + &grad_mean / n_features
         };
 
-        // Update learnable parameters
+        // Update the learnable parameters and propagate the gradient.
         self.optimizer_gamma.step(&mut self.gamma, &grad_gamma, lr);
         self.optimizer_beta.step(&mut self.beta, &grad_beta, lr);
 

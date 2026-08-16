@@ -95,15 +95,17 @@ impl Layer for Embeddings {
     }
 
     fn forward(&mut self, input: &Array2<f32>) -> Array2<f32> {
-        // input shape is [1, sequence_length]
+        // Cache the input; input shape is [1, sequence_length].
         self.cached_input = Some(input.clone());
         let token_ids: Vec<usize> = input.iter().map(|&x| x as usize).collect();
+
+        // Full-sequence path: position becomes the next decode step's
+        // index (the number of tokens embedded so far).
         if !self.step_mode || input.ncols() > 1 {
-            // Full-sequence path: position becomes the next decode step's
-            // index (the number of tokens embedded so far).
             self.position = token_ids.len();
-            return self.embed_tokens(&token_ids); // shape is [sequence_length, embedding_dim]
+            return self.embed_tokens(&token_ids);
         }
+
         // Decode step: exactly one new token at the recorded position,
         // byte-identical to the full-sequence embedding of that row.
         let token_embed = self.token_embeddings.row(token_ids[0]).to_owned();
@@ -120,14 +122,14 @@ impl Layer for Embeddings {
     }
 
     fn backward(&mut self, grads: &Array2<f32>, lr: f32) -> Array2<f32> {
+        // Restore the cached input; grads shape is (sequence_length, embedding_dim).
         let input = self.cached_input.as_ref().unwrap();
         let token_ids: Vec<usize> = input.iter().map(|&x| x as usize).collect();
-        let grads = grads.view(); // (sequence_length, embedding_dim)
+        let grads = grads.view();
 
-        // Initialize gradients for embeddings
+        // Scatter each position's gradient into its token and position rows.
         let mut token_grads = Array2::zeros(self.token_embeddings.dim());
         let mut positional_grads = Array2::zeros(self.positional_embeddings.dim());
-
         for (i, &token_id) in token_ids.iter().enumerate() {
             if token_id >= self.token_embeddings.nrows() {
                 panic!(
@@ -137,26 +139,19 @@ impl Layer for Embeddings {
                 );
             }
             let grad_row = grads.row(i);
-
-            // Accumulate token embedding gradients efficiently (no temp variable)
-            {
-                let mut token_row = token_grads.row_mut(token_id);
-                token_row += &grad_row;
-            }
-
-            // Accumulate positional embedding gradients efficiently (no temp variable)
-            {
-                let mut pos_row = positional_grads.row_mut(i);
-                pos_row += &grad_row;
-            }
+            let mut token_row = token_grads.row_mut(token_id);
+            token_row += &grad_row;
+            let mut pos_row = positional_grads.row_mut(i);
+            pos_row += &grad_row;
         }
 
+        // Update both embedding tables through their optimizers.
         self.token_optimizer
             .step(&mut self.token_embeddings, &token_grads, lr);
         self.positional_optimizer
             .step(&mut self.positional_embeddings, &positional_grads, lr);
 
-        // Return gradient to propagate further back
+        // The gradient passes through the lookup unchanged.
         grads.to_owned()
     }
 

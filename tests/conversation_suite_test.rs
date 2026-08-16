@@ -30,26 +30,86 @@ struct Probe {
 }
 
 const PROBES: &[Probe] = &[
-    Probe { prompt: "User: hi!", class: Class::Greeting },
-    Probe { prompt: "User: hello", class: Class::Greeting },
-    Probe { prompt: "User: hey!", class: Class::Greeting },
-    Probe { prompt: "User: good morning", class: Class::Greeting },
-    Probe { prompt: "User: howdy", class: Class::Greeting },
-    Probe { prompt: "User: yo!", class: Class::Greeting },
-    Probe { prompt: "User: What is gravity?", class: Class::Oov },
-    Probe { prompt: "User: What is lightning?", class: Class::Oov },
-    Probe { prompt: "User: Why is the moon bright?", class: Class::Oov },
-    Probe { prompt: "User: What does the ocean contain?", class: Class::Oov },
-    Probe { prompt: "User: what's my name?", class: Class::MixedOov },
-    Probe { prompt: "User: how are you today?", class: Class::MixedOov },
-    Probe { prompt: "User: Are you sure?", class: Class::MixedOov },
-    Probe { prompt: "User: What's goign on here?", class: Class::MixedOov },
-    Probe { prompt: "User: do do da doop", class: Class::CasualJunk },
-    Probe { prompt: "User: life can be neat?", class: Class::CasualJunk },
-    Probe { prompt: "User: what else can we use?", class: Class::CasualJunk },
-    Probe { prompt: "User: Water?", class: Class::InVocab },
-    Probe { prompt: "User: clouds!", class: Class::InVocab },
-    Probe { prompt: "User: the ocean", class: Class::InVocab },
+    Probe {
+        prompt: "User: hi!",
+        class: Class::Greeting,
+    },
+    Probe {
+        prompt: "User: hello",
+        class: Class::Greeting,
+    },
+    Probe {
+        prompt: "User: hey!",
+        class: Class::Greeting,
+    },
+    Probe {
+        prompt: "User: good morning",
+        class: Class::Greeting,
+    },
+    Probe {
+        prompt: "User: howdy",
+        class: Class::Greeting,
+    },
+    Probe {
+        prompt: "User: yo!",
+        class: Class::Greeting,
+    },
+    Probe {
+        prompt: "User: What is gravity?",
+        class: Class::Oov,
+    },
+    Probe {
+        prompt: "User: What is lightning?",
+        class: Class::Oov,
+    },
+    Probe {
+        prompt: "User: Why is the moon bright?",
+        class: Class::Oov,
+    },
+    Probe {
+        prompt: "User: What does the ocean contain?",
+        class: Class::Oov,
+    },
+    Probe {
+        prompt: "User: what's my name?",
+        class: Class::MixedOov,
+    },
+    Probe {
+        prompt: "User: how are you today?",
+        class: Class::MixedOov,
+    },
+    Probe {
+        prompt: "User: Are you sure?",
+        class: Class::MixedOov,
+    },
+    Probe {
+        prompt: "User: What's goign on here?",
+        class: Class::MixedOov,
+    },
+    Probe {
+        prompt: "User: do do da doop",
+        class: Class::CasualJunk,
+    },
+    Probe {
+        prompt: "User: life can be neat?",
+        class: Class::CasualJunk,
+    },
+    Probe {
+        prompt: "User: what else can we use?",
+        class: Class::CasualJunk,
+    },
+    Probe {
+        prompt: "User: Water?",
+        class: Class::InVocab,
+    },
+    Probe {
+        prompt: "User: clouds!",
+        class: Class::InVocab,
+    },
+    Probe {
+        prompt: "User: the ocean",
+        class: Class::InVocab,
+    },
 ];
 
 fn artifact_path() -> Option<String> {
@@ -80,7 +140,10 @@ fn verdict(model: &mut LLM, prompt: &str) -> (Verdict, String, usize, Vec<String
         .iter()
         .filter(|&&t| model.vocab.words[t] == "<unk>")
         .count();
-    let decoded: Vec<String> = tokens.iter().map(|t| model.vocab.words[*t].clone()).collect();
+    let decoded: Vec<String> = tokens
+        .iter()
+        .map(|t| model.vocab.words[*t].clone())
+        .collect();
     let output = model.predict(prompt);
     let verdict = if output.contains(HEDGE) {
         if output.starts_with("Assistant :") {
@@ -106,7 +169,10 @@ fn verdict(model: &mut LLM, prompt: &str) -> (Verdict, String, usize, Vec<String
 /// jittered hedge or a greeting -- never a confident in-domain sentence or
 /// a fragment.
 fn is_appropriate(verdict: Verdict) -> bool {
-    matches!(verdict, Verdict::Hedge | Verdict::JitterHedge | Verdict::Greeting)
+    matches!(
+        verdict,
+        Verdict::Hedge | Verdict::JitterHedge | Verdict::Greeting
+    )
 }
 
 #[test]
@@ -139,31 +205,41 @@ fn conversation_suite_pass_table_holds_the_baseline() {
         );
     }
 
-    let out_of_domain: usize = [Class::Greeting, Class::Oov, Class::MixedOov, Class::CasualJunk]
-        .iter()
-        .map(|class| class_counts.get(class).map_or(0, |c| c.iter().sum()))
-        .sum();
-    let appropriate: usize = [Class::Greeting, Class::Oov, Class::MixedOov, Class::CasualJunk]
-        .iter()
-        .map(|class| {
-            class_counts.get(class).map_or(0, |c| {
-                c.iter()
-                    .enumerate()
-                    .filter(|(i, _)| {
-                        is_appropriate(match i {
-                            0 => Verdict::Hedge,
-                            1 => Verdict::JitterHedge,
-                            2 => Verdict::PartialHedge,
-                            3 => Verdict::Greeting,
-                            4 => Verdict::ConfidentAnswer,
-                            _ => Verdict::Fragment,
-                        })
+    let out_of_domain: usize = [
+        Class::Greeting,
+        Class::Oov,
+        Class::MixedOov,
+        Class::CasualJunk,
+    ]
+    .iter()
+    .map(|class| class_counts.get(class).map_or(0, |c| c.iter().sum()))
+    .sum();
+    let appropriate: usize = [
+        Class::Greeting,
+        Class::Oov,
+        Class::MixedOov,
+        Class::CasualJunk,
+    ]
+    .iter()
+    .map(|class| {
+        class_counts.get(class).map_or(0, |c| {
+            c.iter()
+                .enumerate()
+                .filter(|(i, _)| {
+                    is_appropriate(match i {
+                        0 => Verdict::Hedge,
+                        1 => Verdict::JitterHedge,
+                        2 => Verdict::PartialHedge,
+                        3 => Verdict::Greeting,
+                        4 => Verdict::ConfidentAnswer,
+                        _ => Verdict::Fragment,
                     })
-                    .map(|(_, n)| n)
-                    .sum::<usize>()
-            })
+                })
+                .map(|(_, n)| n)
+                .sum::<usize>()
         })
-        .sum();
+    })
+    .sum();
     println!(
         "out-of-domain appropriate rate: {appropriate}/{out_of_domain} (hedge or greeting, \
          never a confident water-cycle answer or fragment)"
