@@ -19,7 +19,7 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]\n",
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
@@ -30,6 +30,7 @@ fn help_flags_print_the_same_contract_without_loading_data() {
         "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin\n",
         "  llm --tiny --eval --model models/ts.bin --fluency 20\n",
         "  llm --tiny --eval --model models/ts.bin --temperature 0.7 --presence 1.5\n",
+        "  llm --tiny --eval --model models/ts.bin --temperature 0.7 --top-p 0.8 --presence 1.5\n",
         "  llm --probe --model models/mine.bin --seed 42\n",
     );
 
@@ -306,6 +307,33 @@ fn penalties_require_tiny_eval() {
         (
             vec!["--tiny", "--eval", "--repetition", "xyz"],
             "error: invalid repetition: xyz\nTry 'llm --help' for usage.\n",
+        ),
+    ] {
+        let output = run(&arguments, &std::env::temp_dir());
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(stderr(&output), message);
+    }
+}
+
+#[test]
+fn top_p_requires_tiny_eval() {
+    for (arguments, message) in [
+        (
+            vec!["--top-p", "0.8"],
+            "error: --top-p requires --tiny --eval\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--eval", "--top-p", "0"],
+            "error: --top-p must be in (0, 1]\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--eval", "--top-p", "1.5"],
+            "error: --top-p must be in (0, 1]\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--eval", "--top-p", "abc"],
+            "error: invalid top-p: abc\nTry 'llm --help' for usage.\n",
         ),
     ] {
         let output = run(&arguments, &std::env::temp_dir());

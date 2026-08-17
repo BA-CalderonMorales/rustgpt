@@ -20,4 +20,6 @@ pub(crate) struct Invocation {
     pub presence: f32,
     /// Count-scaled logit penalty divisor (1.0 = off), tiny-lane eval only.
     pub repetition: f32,
+    /// Nucleus (top-p) mass cutoff (0.0 = off), tiny-lane eval only.
+    pub top_p: f32,
 }

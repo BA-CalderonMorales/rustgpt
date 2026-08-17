@@ -174,6 +174,35 @@ small enough to explain, test, and reverse.
 
 ## Training and Data (the collapse probes)
 
+- **Top-p nucleus sampling, FALSIFIED on the W4 winner (2026-08-16, W6,
+  seed 42).** Claim: "top-p truncation (p in {0.80, 0.90, 0.95}) combined
+  with the W4 winner preserves fluency while trimming the low-mass tail
+  that traps the decoder, improving distinct-n over temperature-only."
+  `--top-p <p>` truncates the distribution to the smallest cumulative-
+  mass nucleus and draws within it (the model keeps its own ranked mass,
+  unlike the falsified uniform top-k). Table on ts-13m-s42.bin
+  (--fluency 20, seed 42):
+
+  | config | gate | distinct-1 | distinct-2 | rf | sents |
+  |--------|------|-----------|-----------|-----|-------|
+  | T=1.2 (W4 control) | 0.000 | 0.820 | 1.000 | 0.60 | 5.7 |
+  | T=1.2, p=0.80 | 0.000 | 0.737 | 0.996 | 0.45 | 6.5 |
+  | T=1.2, p=0.90 | 0.000 | 0.784 | 0.998 | 0.45 | 6.6 |
+  | T=1.2, p=0.95 | 0.000 | 0.807 | 0.998 | 0.60 | 5.3 |
+  | Qwen stack (T=0.7, p=0.80, pres 1.5) | 0.021 | 0.544 | 0.957 | 0.00 | 14.3 |
+  | Qwen stack + repetition 1.1 | 0.021 | 0.701 | 0.993 | 0.65 | 7.1 |
+
+  Verdict: FALSIFIED as claimed -- at every p on the W4 winner,
+  distinct-1 drops (0.820 -> 0.737-0.807) and repetition-free regresses
+  at p <= 0.90: the low-mass tail IS the diversity at T=1.2, and nucleus
+  truncation trims exactly it. The gate stays 0.000 (truncation does not
+  re-collapse), so the knob is harmless but pointless on this artifact.
+  The full-stack rows earn the release recipe: the Qwen-faithful stack
+  (T=0.7, top-p 0.80, presence 1.5) lands gate 0.021, and adding the W5
+  count-scaled insight (repetition 1.1) lifts repetition-free to 0.65
+  with distinct-1 0.70 and ~7 sentences per completion -- the best
+  all-around config measured, honoring Qwen's documented decode family
+  plus the mechanism that actually matches the frequency head.
 - **The repetition-penalty family, LANDED (2026-08-16, W5, seed 42).**
   Claim: "a logit-level anti-repetition penalty -- presence (flat per
   seen token) or repetition (scaled by count) -- deterministically

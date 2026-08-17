@@ -5,11 +5,12 @@ const DEFAULT_EPOCHS: usize = 100;
 const DEFAULT_TEMPERATURE: f32 = 1.0;
 const DEFAULT_PRESENCE: f32 = 0.0;
 const DEFAULT_REPETITION: f32 = 1.0;
+const DEFAULT_TOP_P: f32 = 0.0;
 
 fn usage() {
     // The one-line contract: flags first, then exactly one mode.
     println!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]"
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]"
     );
     println!();
 
@@ -25,6 +26,9 @@ fn usage() {
     );
     println!("  llm --tiny --eval --model models/ts.bin --fluency 20");
     println!("  llm --tiny --eval --model models/ts.bin --temperature 0.7 --presence 1.5");
+    println!(
+        "  llm --tiny --eval --model models/ts.bin --temperature 0.7 --top-p 0.8 --presence 1.5"
+    );
     println!("  llm --probe --model models/mine.bin --seed 42");
 }
 
@@ -42,6 +46,8 @@ fn try_parse() -> Result<Invocation, String> {
     let mut fluency: Option<usize> = None;
     let mut presence = DEFAULT_PRESENCE;
     let mut repetition = DEFAULT_REPETITION;
+    let mut top_p = DEFAULT_TOP_P;
+    let mut top_p_given = false;
 
     // Consume every argument in order.
     while index < args.len() {
@@ -130,6 +136,16 @@ fn try_parse() -> Result<Invocation, String> {
                     .parse()
                     .map_err(|_| format!("invalid repetition: {value}"))?;
             }
+            "--top-p" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--top-p requires a value".to_string())?;
+                index += 1;
+                top_p = value
+                    .parse()
+                    .map_err(|_| format!("invalid top-p: {value}"))?;
+                top_p_given = true;
+            }
             "--e2e" => {
                 if mode.is_some() {
                     return Err(
@@ -197,7 +213,8 @@ fn try_parse() -> Result<Invocation, String> {
         return Err("--fluency needs at least one sample".to_string());
     }
 
-    // The penalty knobs belong to the tiny-lane eval formula alone.
+    // The penalty and top-p knobs belong to the tiny-lane eval formula
+    // alone.
     if (presence != DEFAULT_PRESENCE || repetition != DEFAULT_REPETITION)
         && !(tiny && matches!(mode, Mode::Eval))
     {
@@ -208,6 +225,12 @@ fn try_parse() -> Result<Invocation, String> {
     }
     if repetition < 1.0 {
         return Err("--repetition must be >= 1.0".to_string());
+    }
+    if top_p_given && !(tiny && matches!(mode, Mode::Eval)) {
+        return Err("--top-p requires --tiny --eval".to_string());
+    }
+    if top_p_given && (top_p <= 0.0 || top_p > 1.0) {
+        return Err("--top-p must be in (0, 1]".to_string());
     }
 
     // Resolve the seed: machine modes default to 42, interactive draws
@@ -229,6 +252,7 @@ fn try_parse() -> Result<Invocation, String> {
         fluency,
         presence,
         repetition,
+        top_p,
     })
 }
 

@@ -25,6 +25,7 @@ pub(crate) fn tiny_eval(
     temperature: f32,
     presence: f32,
     repetition: f32,
+    top_p: f32,
 ) -> serde_json::Value {
     // Per-item teacher-forced CE and vocabulary coverage over the held-out
     // slice (never a training slice).
@@ -45,7 +46,8 @@ pub(crate) fn tiny_eval(
 
     // The generation-collapse gate over a fixed-length sample decoded at
     // the run's config.
-    let (repetition_rate, sample_len) = collapse_gate(llm, temperature, presence, repetition);
+    let (repetition_rate, sample_len) =
+        collapse_gate(llm, temperature, presence, repetition, top_p);
     serde_json::json!({
         "source": TINY_HELDOUT,
         "items": stories.len(),
@@ -67,25 +69,31 @@ pub(crate) fn tiny_eval(
 /// Greedy sample from a fixed starter; rate is the fraction of adjacent
 /// token pairs that are identical (a collapsed model approaches 1.0).
 /// The lane's decoder at a config: greedy (pinned, T=1.0) or seeded
-/// probability-weighted sampling (every other T), with the optional
-/// logit-level anti-repetition penalties applied on either leg. `rng` is
-/// consumed only by the sampling legs, so greedy runs stay deterministic
-/// without one.
+/// probability-weighted / nucleus sampling (every other T), with the
+/// optional logit-level anti-repetition penalties applied on either leg.
+/// `rng` is consumed only by the sampling legs, so greedy runs stay
+/// deterministic without one.
 fn decode_leg(
     llm: &mut LLM,
     temperature: f32,
     presence: f32,
     repetition: f32,
+    top_p: f32,
     rng: &mut llm::Xorshift,
 ) -> String {
     // Penalties active: either coefficient is off its default.
     let penalized = presence != 0.0 || repetition != 1.0;
+    let nucleus = top_p > 0.0;
     if temperature == 1.0 {
         if penalized {
             llm.predict_penalized(TINY_STARTER, temperature, presence, repetition)
         } else {
             llm.predict_scaled(TINY_STARTER, temperature)
         }
+    } else if nucleus && penalized {
+        llm.predict_nucleus_penalized(TINY_STARTER, temperature, top_p, presence, repetition, rng)
+    } else if nucleus {
+        llm.predict_nucleus(TINY_STARTER, temperature, top_p, rng)
     } else if penalized {
         llm.predict_weighted_penalized(TINY_STARTER, temperature, presence, repetition, rng)
     } else {
@@ -96,30 +104,37 @@ fn decode_leg(
 /// The decode-quality yardstick over `samples` seeded generations from the
 /// fixed starter, scored by the llm::fluency_score instrument. The sampler
 /// is the lane's decoder at the run's config: greedy at T=1.0 (the W3
-/// calibration pin), seeded probability-weighted sampling otherwise, both
-/// with the optional penalties.
+/// calibration pin), seeded sampling otherwise, penalties and top-p
+/// applied when given.
 pub(crate) fn fluency_probe(
     llm: &mut LLM,
     temperature: f32,
     presence: f32,
     repetition: f32,
+    top_p: f32,
     samples: usize,
 ) -> FluencyScore {
     // One seeded PRNG for the whole batch: samples at a config are
     // reproducible AND varied.
     let mut rng = llm::Xorshift::new(llm::seed());
     let generated: Vec<String> = (0..samples)
-        .map(|_| decode_leg(llm, temperature, presence, repetition, &mut rng))
+        .map(|_| decode_leg(llm, temperature, presence, repetition, top_p, &mut rng))
         .collect();
     llm.fluency_score(&generated)
 }
 
-fn collapse_gate(llm: &mut LLM, temperature: f32, presence: f32, repetition: f32) -> (f32, usize) {
+fn collapse_gate(
+    llm: &mut LLM,
+    temperature: f32,
+    presence: f32,
+    repetition: f32,
+    top_p: f32,
+) -> (f32, usize) {
     // Generate the fixed-length sample at the run's config: greedy at
-    // T=1.0 (the pinned leg), seeded sampling at every other T, both with
-    // the optional logit-level penalties.
+    // T=1.0 (the pinned leg), seeded sampling at every other T, penalties
+    // and top-p applied when given.
     let mut rng = llm::Xorshift::new(llm::seed());
-    let generated = decode_leg(llm, temperature, presence, repetition, &mut rng);
+    let generated = decode_leg(llm, temperature, presence, repetition, top_p, &mut rng);
     let tokens = llm.tokenize(&generated);
     let sample = &tokens[..tokens.len().min(TINY_SAMPLE_LEN)];
 
@@ -140,6 +155,7 @@ pub(crate) fn run_tiny_eval(
     temperature: f32,
     presence: f32,
     repetition: f32,
+    top_p: f32,
     fluency: Option<usize>,
 ) {
     // Exactly one JSON object carrying the lane's score formula, plus the
@@ -151,10 +167,11 @@ pub(crate) fn run_tiny_eval(
         "temperature": temperature,
         "presence": presence,
         "repetition": repetition,
-        "eval": tiny_eval(llm, temperature, presence, repetition),
+        "top_p": top_p,
+        "eval": tiny_eval(llm, temperature, presence, repetition, top_p),
     });
     if let Some(samples) = fluency {
-        let score = fluency_probe(llm, temperature, presence, repetition, samples);
+        let score = fluency_probe(llm, temperature, presence, repetition, top_p, samples);
         output["fluency"] = serde_json::json!({
             "samples": samples,
             "distinct_1": score.distinct_1,

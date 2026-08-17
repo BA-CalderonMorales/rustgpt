@@ -346,6 +346,51 @@ impl LLM {
         self.answer_string(text, &output_tokens)
     }
 
+    /// Nucleus (top-p) sampling through the cached path: the distribution
+    /// is truncated to the smallest set of tokens whose cumulative mass
+    /// reaches `top_p`, renormalized, and drawn from with the caller's
+    /// rng. The model keeps its own ranked mass -- unlike the falsified
+    /// uniform top-k, which flattens the ranks.
+    pub fn predict_nucleus(
+        &mut self,
+        text: &str,
+        temperature: f32,
+        top_p: f32,
+        rng: &mut Xorshift,
+    ) -> String {
+        let output_tokens =
+            self.decode_cached(text, temperature, &mut |logits: &Array2<f32>, _| {
+                let probs = Self::softmax(logits);
+                Self::nucleus_draw(&probs, top_p, rng)
+            });
+        self.answer_string(text, &output_tokens)
+    }
+
+    /// Nucleus sampling with the logit-level anti-repetition penalties:
+    /// the penalty-adjusted, temperature-scaled distribution is truncated
+    /// to the top-p nucleus and drawn from. The full Qwen decode stack's
+    /// sampler (instruct: temperature 0.7, top-p 0.80, presence 1.5).
+    pub fn predict_nucleus_penalized(
+        &mut self,
+        text: &str,
+        temperature: f32,
+        top_p: f32,
+        presence: f32,
+        repetition: f32,
+        rng: &mut Xorshift,
+    ) -> String {
+        let output_tokens = self.decode_cached(
+            text,
+            temperature,
+            &mut |logits: &Array2<f32>, generated: &[usize]| {
+                let adjusted = Self::apply_penalties(logits, generated, presence, repetition);
+                let probs = Self::softmax(&adjusted);
+                Self::nucleus_draw(&probs, top_p, rng)
+            },
+        );
+        self.answer_string(text, &output_tokens)
+    }
+
     /// Probability-weighted sampling with the same logit-level penalties
     /// as `predict_penalized`: draws from the penalty-adjusted
     /// temperature-scaled distribution with the caller's seeded rng.
@@ -765,6 +810,46 @@ impl LLM {
             }
         }
         adjusted
+    }
+
+    /// Nucleus (top-p) draw: rank the tokens by probability, find the
+    /// smallest prefix whose cumulative mass reaches `top_p`, renormalize
+    /// that survivor set, and draw within it. Keeps the model's own ranked
+    /// mass; the low-mass tail never speaks.
+    fn nucleus_draw(probs: &Array2<f32>, top_p: f32, rng: &mut Xorshift) -> usize {
+        // Rank by probability and find the nucleus cutoff by cumulative
+        // mass.
+        let row = probs.row(0);
+        let mut ranked: Vec<(usize, f32)> = row.iter().copied().enumerate().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+        let mut mass = 0.0f32;
+        let mut cutoff = ranked.len();
+        for (index, (_, probability)) in ranked.iter().enumerate() {
+            mass += probability;
+            if mass >= top_p {
+                cutoff = index + 1;
+                break;
+            }
+        }
+
+        // One uniform draw over the survivor mass.
+        let survivor_mass: f32 = ranked[..cutoff]
+            .iter()
+            .map(|(_, probability)| probability)
+            .sum();
+        let draw = (rng.next_u64() as f64 / u64::MAX as f64) as f32 * survivor_mass;
+
+        // Walk the survivors' cumulative mass until the draw lands.
+        let mut cumulative = 0.0f32;
+        for (token, probability) in &ranked[..cutoff] {
+            cumulative += probability;
+            if draw <= cumulative {
+                return *token;
+            }
+        }
+
+        // Floating-point tail: the last survivor owns the residual mass.
+        ranked[cutoff - 1].0
     }
 
     /// Seeded probability-weighted draw over a 1-row softmax distribution:
