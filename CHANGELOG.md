@@ -5,6 +5,93 @@ produced: score, trajectory, and artifacts. The top section becomes the
 GitHub release body (see `.github/workflows/release.yml`), so the public
 record and the repo history are the same document.
 
+## [0.0.7] - 2026-08-16
+
+The quality release: from boolean gate to measurable fluency. Greedy decode
+collapses (repetition rate 1.0, a 123-period loop); the Qwen-honoring
+decode stack -- probability-weighted temperature sampling at 0.7 with
+top-p 0.80, presence 1.5, and the count-scaled repetition penalty at 1.1 --
+lands the gate at 0.021 with 65% of completions fully repetition-free,
+distinct-1 0.70, distinct-2 0.99, and ~7 sentences per completion, on the
+same 14M-param artifact, no retraining.
+
+Foundation (W1): one-batch overfit audit. A micro-config model drives a
+single story to teacher-forced loss 0.0008 over 200 epochs (seed 42, LR
+5e-4) and re-emits it greedily from a mid-story prefix: reproduction 1.0,
+repetition-free. The mechanics (token/label alignment, optimizer, loss
+masking) are sound -- every downstream lever is trustworthy.
+
+Instruments (W2, W3): `--tiny --train` now samples a per-epoch logit
+profile (mean top-1 margin, top-2 gap, logit norm, softmax entropy) over
+the held-out stream; `--tiny --eval --fluency <n>` adds the decode-quality
+yardstick (distinct-1/2, repetition-free rate, completion probe). W2's
+margin half is falsified: the attractor is a MOVING frequency-correlated
+head (p1-p2 stays flat while the rank-1 identity drifts), and the regime
+shift is visible as entropy falling 5.16 -> 4.80 and logit norm rising
+89.6 -> 141.2 across 6 epochs. W3 calibrated the pass floor
+(repetition-free >= 0.5 AND distinct-1 >= 0.1) on a fully collapsed
+artifact (distinct-1 0.008, 123 periods).
+
+Decode levers (W4 landed, W5 landed, W6 falsified): W4 -- sampling from
+the temperature-scaled softmax (seeded) breaks the gate at every T
+(0.7: 0.095, 0.8: 0.021, 0.9: 0.021, 1.1: 0.011, 1.2: 0.000 vs the 1.0
+greedy pin); the attractor is a deterministic-argmax phenomenon -- the
+falsified uniform top-k threw away exactly the rank-2+ mass sampling
+restores. W5 -- the count-scaled repetition penalty is a TOTAL
+deterministic loop-breaker at greedy (gate 0.000 at coefficient 1.1, every
+presence); flat presence alone only shifts the attractor (1.000 -> 0.832).
+W6 -- top-p is falsified as an improvement on the W4 winner: it trims the
+very low-mass tail that supplies diversity (distinct-1 0.820 -> 0.737 at
+p=0.80), but the full Qwen stack probe earns the release recipe. The
+recipe honors Qwen3.8-27B's documented instruct decode family
+(temperature 0.7, top_p 0.80, presence 1.5; unsloth GGUF card, apache-2.0)
+with one principled deviation: repetition 1.1, the coefficient our W5 grid
+measured as the count-scaled winner on this artifact.
+
+Surfaces: `--models` serves the model catalog (models/catalog.json --
+path, family, parameters, seed, recipe, eval, quality per artifact);
+interactive `--model <path>` is now the use surface -- load a trained
+checkpoint and chat, no training, no re-save; a bare `--` is a no-op
+separator; `--temperature`, `--presence`, `--repetition`, `--top-p`, and
+`--fluency` are tiny-eval decode knobs, seeded and reproducible, with the
+greedy leg pinned. The demo tape (re-recorded, 4.0 MB) walks: catalog,
+contract probe, the domain-labeled trace on the loaded artifact, micro
+arena, laptop lane, and the headline gate defeat via
+`scripts/demo/show_gate.py`. A root `makefile` surfaces the gates and
+lanes (`make verify`, `make build`, `make demo`, ...). The OneDrive build
+tax is measured (14.1s vs 5.9s incremental release rebuild, 2.4x) and the
+`CARGO_TARGET_DIR` workaround is documented. docs/model-workflow.md walks
+create -> score -> decode recipe -> record -> use -> ship.
+
+Scores and pins (seed 42 throughout): micro lane held-out 4/4 exact, 4/4
+prefix, mean 1.0, trajectory [5.67, 1.53, 1.52, 1.55, 1.68] -- unchanged
+by design; tiny lane CE p10/p50/p90 = 5.49/5.87/6.31, coverage 0.9976;
+collapse gate 1.0 (greedy pin) -> 0.021 (release stack). W7 (label
+smoothing) and W8 (LR decay) are predeclared in the backlog with recipes
+and falsification criteria; the decode-side win made them optional for
+this release.
+
+Perspective (three oracles, quoted; perception evidence, never merged into
+score numbers): codex cold-viewer -- "the release's strongest evidence is
+the W4/W5/W6 decode study... a clean intervention ladder on one fixed
+artifact"; weakest is "the model's claimed language quality... sampling
+and penalties route around that failure; they do not establish learned
+storytelling"; next moves ranked: train longer with checkpoints, a
+repetition-aware training loss, a richer continuation-quality corpus.
+codex ML-scientist advisory -- the claim should stay narrow:
+"decode-time controls defeat greedy collapse on ts-13m-s42.bin under the
+specified yardstick"; regime-sensitive risks named: single-seed
+sensitivity, teacher-forced/free-running mismatch, the T=1-greedy vs
+T!=1-sampled decoder-mode discontinuity, n=20 fluency sample size,
+distinct-n gaming by incoherent tails, single-starter prompt dependence,
+and Qwen transfer risk (tokenizer/scale/calibration differ). DeepSeek V4
+Pro 0813 (headless opencode) -- "the evidence supports 'greedy
+deterministic-argmax over a count-correlated logit bias causes repetition
+collapse on this artifact' -- that claim is tight and reproducible";
+labeling it a 'frequency head' without internals evidence overreaches
+("an inference, not a measurement"), and teacher-forced CE blindness is a
+measurement gap, not a discovery about the model. Bounded claim: sound.
+
 ## [0.0.6] - 2026-08-16
 
 The observability release: make the pipeline traceable first, spend the
