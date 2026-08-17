@@ -174,6 +174,23 @@ small enough to explain, test, and reverse.
 
 ## Training and Data (the collapse probes)
 
+- **Label smoothing, PREDECLARED, not yet run (2026-08-16, W7).** The
+  decode-side levers (W4 sampling, W5 penalties) already break the
+  collapse gate deterministically, so this training-side lever is
+  deferred to the backlog, claim intact: "training with label smoothing
+  eps in {0.1, 0.2} prevents the one-hot-corner overconfidence that
+  becomes the greedy attractor, measurably reducing post-training top-1
+  margin and greedy repetition on the demo slice." Recipe when run:
+  demo slice, seed 42, epochs matched to the W2 6-epoch run, CE
+  trajectories side-by-side; falsified if smoothing costs CE without
+  touching the gate. Target-construction change in the loss path only.
+- **Controlled LR decay, PREDECLARED, not yet run (2026-08-16, W8).**
+  Claim intact: "a linear LR decay (5e-4 -> 5e-5 over the run) keeps the
+  demo-slice run CE-stable and lowers greedy repetition vs constant LR."
+  ORDER when run: demo slice first (~40s/epoch, the collapse reproduces
+  there identically), full 40k corpus only if the slice passes. Constant
+  LR destabilized at 12 epochs (loss 5.23 -> 5.37); the W4/W5 verdicts
+  mean a slice fail is a recorded falsification with no further spend.
 - **Top-p nucleus sampling, FALSIFIED on the W4 winner (2026-08-16, W6,
   seed 42).** Claim: "top-p truncation (p in {0.80, 0.90, 0.95}) combined
   with the W4 winner preserves fluency while trimming the low-mass tail
