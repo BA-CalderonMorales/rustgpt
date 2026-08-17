@@ -4,6 +4,7 @@ pub(crate) enum Mode {
     Eval,
     Train { path: String },
     Probe,
+    Models,
 }
 
 pub(crate) struct Invocation {

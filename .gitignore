@@ -2,6 +2,9 @@
 
 # Local trained checkpoints are artifacts, never source
 /models/
+!models/
+/models/*
+!models/catalog.json
 
 # Demo recordings are regenerable artifacts
 scripts/demo/*.cast

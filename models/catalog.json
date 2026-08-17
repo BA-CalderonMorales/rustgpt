@@ -1,0 +1,92 @@
+[
+    {
+        "id": "ts-13m-s42",
+        "path": "models/tinystories/ts-13m-s42.bin",
+        "family": "tinystories",
+        "parameters": 14230655,
+        "seed": 42,
+        "recipe": {
+            "data": "models/tinystories/train.jsonl",
+            "stories": 40000,
+            "epochs": 1,
+            "lr": 0.0005
+        },
+        "eval": {
+            "ce_p10": 5.49,
+            "ce_p50": 5.87,
+            "ce_p90": 6.31,
+            "coverage": 0.9976,
+            "greedy_gate": 1.0
+        },
+        "decode": {
+            "gate_at_t12": 0.0,
+            "repetition_free_qwen_stack": 0.65
+        },
+        "quality": ["full-corpus", "collapse-free-at-decode (0.0.7 recipe)"]
+    },
+    {
+        "id": "demo-slice",
+        "path": "models/tinystories/demo.bin",
+        "family": "tinystories",
+        "parameters": 7318114,
+        "seed": 42,
+        "recipe": {
+            "data": "models/tinystories/demo.jsonl",
+            "stories": 300,
+            "epochs": 1,
+            "lr": 0.0005
+        },
+        "eval": {
+            "ce_p10": 5.42,
+            "ce_p50": 5.96,
+            "ce_p90": 6.44,
+            "coverage": 0.9058,
+            "greedy_gate": 1.0
+        },
+        "decode": {
+            "gate_at_t12": null,
+            "repetition_free_qwen_stack": null
+        },
+        "quality": ["laptop-lane-demo", "pristine-slice"]
+    },
+    {
+        "id": "watercycle-latest",
+        "path": "models/watercycle-latest.bin",
+        "family": "watercycle",
+        "parameters": 385776,
+        "seed": 42,
+        "recipe": {
+            "data": "data/pretraining_data.json + data/chat_training_data.json",
+            "epochs": "100 + 100",
+            "lr": "5e-4 / 1e-4",
+            "note": "min held-out CE state promoted"
+        },
+        "eval": {
+            "exact_matches": 4,
+            "prefix_matches": 4,
+            "mean_accuracy": 1.0
+        },
+        "decode": {},
+        "quality": ["micro-arena", "stability-oracle"]
+    },
+    {
+        "id": "watercycle-trace",
+        "path": "models/watercycle-trace.bin",
+        "family": "watercycle",
+        "parameters": 385776,
+        "seed": 42,
+        "recipe": {
+            "data": "data/pretraining_data.json + data/chat_training_data.json",
+            "epochs": "100 + 100",
+            "lr": "5e-4 / 1e-4",
+            "note": "dedicated interactive artifact; provenance identical to watercycle-latest"
+        },
+        "eval": {
+            "exact_matches": 4,
+            "prefix_matches": 4,
+            "mean_accuracy": 1.0
+        },
+        "decode": {},
+        "quality": ["interactive-trace"]
+    }
+]

@@ -19,11 +19,13 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]\n",
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe | --models]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
         "  llm --trace --seed 42\n",
+        "  llm --models\n",
+        "  llm --model models/watercycle-latest.bin\n",
         "  llm --e2e \"hello world\"\n",
         "  llm --eval --seed 42\n",
         "  llm --model models/mine.bin --eval --seed 42\n",
@@ -200,7 +202,52 @@ fn eval_and_e2e_are_mutually_exclusive() {
     assert_eq!(stdout(&output), "");
     assert_eq!(
         stderr(&output),
-        "error: --e2e, --eval, --train, and --probe are mutually exclusive\nTry 'llm --help' for usage.\n"
+        "error: --e2e, --eval, --train, --probe, and --models are mutually exclusive\nTry 'llm --help' for usage.\n"
+    );
+}
+
+#[test]
+fn models_and_other_modes_are_mutually_exclusive() {
+    let output = run(&["--models", "--eval"], &std::env::temp_dir());
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: --e2e, --eval, --train, --probe, and --models are mutually exclusive\nTry 'llm --help' for usage.\n"
+    );
+}
+
+#[test]
+fn models_emits_one_json_object_with_the_catalog() {
+    let output = run(&["--models"], Path::new(env!("CARGO_MANIFEST_DIR")));
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(stderr(&output), "");
+    let stdout = stdout(&output);
+    assert_eq!(stdout.lines().count(), 1);
+
+    let response: serde_json::Value =
+        serde_json::from_str(stdout.trim_end()).expect("stdout should be one JSON object");
+    assert_eq!(response["status"].as_str(), Some("ok"));
+    let catalog = response["catalog"]
+        .as_array()
+        .expect("catalog must be an array");
+    assert!(!catalog.is_empty(), "catalog must list the trained models");
+    assert!(
+        catalog
+            .iter()
+            .all(|entry| entry["path"].is_string() && entry["seed"].is_u64())
+    );
+}
+
+#[test]
+fn double_dash_is_a_noop_separator() {
+    // `llm -- --model <path>` must read exactly like `llm --model <path>`.
+    let output = run(&["--", "--e2e"], &std::env::temp_dir());
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: --e2e requires a prompt\nTry 'llm --help' for usage.\n"
     );
 }
 

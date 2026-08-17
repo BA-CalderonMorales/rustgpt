@@ -12,20 +12,43 @@ cd rustgpt
 cargo run
 ```
 
-The default path builds a vocabulary, performs pre-training and instruction
-tuning, prints a sample prediction, and then accepts prompts until `exit` is
-entered.
+Without `--model`, the default path builds a vocabulary, performs
+pre-training and instruction tuning, prints a sample prediction, and then
+accepts prompts until `exit` is entered.
 
 ```text
 Enter prompt: How do mountains form?
 Model output: ...
 ```
 
+With `--model <path>` and an existing checkpoint, the lane is the use
+surface: the checkpoint is loaded and prompts are answered directly -- no
+training, no re-save. `llm --model models/watercycle-latest.bin` (or
+`llm -- --model models/watercycle-latest.bin`) starts a chat against the
+trained artifact in seconds; `llm --models` lists what is available. See
+[docs/model-workflow.md](model-workflow.md) for the full creation-to-use
+walk.
+
 Because this is a small educational model, generated text should be treated as
 an observation of the mechanics rather than a quality benchmark.
 
 The original project demonstration is available in this
 [GitHub attachment](https://github.com/user-attachments/assets/ec4a4100-b03a-4b3c-a7d6-806ea54ed4ed).
+
+## The Model Catalog
+
+```bash
+cargo run --release -- --models
+```
+
+`--models` prints exactly one JSON object: the trained-model catalog
+(`models/catalog.json`). Every entry is the durable record of one artifact:
+path, family, parameters, seed, recipe (data, epochs, LR), eval numbers,
+decode-quality numbers, and quality labels. The catalog is how you see what
+was made and how it was made -- the first stop before choosing a checkpoint.
+`--` is accepted as a no-op separator (`llm -- --model <path>` reads like
+`llm --model <path>`), and `--model <path>` in interactive mode loads the
+checkpoint and chats with it directly: no training, no re-save.
 
 ## Machine-Readable Mode
 

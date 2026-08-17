@@ -9,8 +9,15 @@ fn main() {
 
     llm::set_seed(invocation.seed);
 
-    // Two disjoint views: the interactive lane trains then chats; the
-    // headless lane serves exactly one JSON object.
+    // The catalog probe is a pure read: no datasets, no model.
+    if matches!(invocation.mode, cli::Mode::Models) {
+        application::run_models();
+        return;
+    }
+
+    // Two disjoint views: the interactive lane trains then chats (or, with
+    // a loaded checkpoint, chats only); the headless lane serves exactly
+    // one JSON object.
     let dataset = application::load_datasets();
     let mut model = application::build_llm(&dataset, &invocation);
 

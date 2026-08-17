@@ -183,6 +183,9 @@ pub(crate) fn run_headless(invocation: &Invocation, dataset: &Dataset, llm: &mut
         Mode::Interactive => {
             unreachable!("interactive has its own view");
         }
+        Mode::Models => {
+            unreachable!("--models has its own early dispatch");
+        }
     }
 }
 
@@ -495,9 +498,6 @@ fn run_training_and_interactive(
     // Startup trace: which domain shaped this session.
     trace_startup(dataset, llm, model_path, trace);
 
-    // The fixed probe prompt this session demonstrates.
-    let string = String::from("User: How do mountains form?");
-
     // Model information.
     println!("\n=== MODEL INFORMATION ===");
     println!("Network architecture: {}", llm.network_description());
@@ -507,6 +507,18 @@ fn run_training_and_interactive(
     );
     println!("Total parameters: {}", llm.total_parameters());
     println!("Seed: {}", llm::seed());
+
+    // A loaded checkpoint is the use surface: chat directly against the
+    // artifact, no training, no re-save (the artifact stays the artifact).
+    if let Some(path) = model_path.filter(|path| std::path::Path::new(path).exists()) {
+        println!("\n=== LOADED MODEL (no training, no re-save) ===");
+        println!("Checkpoint: {path}");
+        chat_loop(llm, trace);
+        return;
+    }
+
+    // The fixed probe prompt this session demonstrates.
+    let string = String::from("User: How do mountains form?");
 
     // The untrained model's noise, for contrast.
     println!("\n=== BEFORE TRAINING ===");
@@ -544,6 +556,13 @@ fn run_training_and_interactive(
     println!("======================\n");
 
     // Chat loop until "exit".
+    chat_loop(llm, trace);
+}
+
+/// Prompt loop until "exit": the shared chat surface of the training demo
+/// and the loaded-model use path. Traced turns capture every decode step;
+/// the default path keeps the untraced `predict` surface untouched.
+fn chat_loop(llm: &mut LLM, trace: &Trace) {
     println!("\n--- Interactive Mode ---");
     println!("Type a prompt and press Enter to generate text.");
     println!("Type 'exit' to quit.");

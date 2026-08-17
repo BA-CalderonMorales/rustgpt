@@ -10,7 +10,7 @@ const DEFAULT_TOP_P: f32 = 0.0;
 fn usage() {
     // The one-line contract: flags first, then exactly one mode.
     println!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe]"
+        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe | --models]"
     );
     println!();
 
@@ -18,6 +18,8 @@ fn usage() {
     println!("Examples:");
     println!("  llm");
     println!("  llm --trace --seed 42");
+    println!("  llm --models");
+    println!("  llm --model models/watercycle-latest.bin");
     println!("  llm --e2e \"hello world\"");
     println!("  llm --eval --seed 42");
     println!("  llm --model models/mine.bin --eval --seed 42");
@@ -52,9 +54,14 @@ fn try_parse() -> Result<Invocation, String> {
     // Consume every argument in order.
     while index < args.len() {
         // A bare token (not a flag) directly after a mode's value is that
-        // mode's second positional; any other bare token is unknown.
+        // mode's second positional; any other bare token is unknown. A
+        // bare "--" is a no-op separator: this CLI has no positionals, so
+        // it exists so `llm -- --model <path>` reads naturally.
         let argument = args[index].as_str();
         index += 1;
+        if argument == "--" {
+            continue;
+        }
         if !argument.starts_with('-') && mode.is_some() {
             return Err("mode argument accepts exactly one value".to_string());
         }
@@ -149,7 +156,8 @@ fn try_parse() -> Result<Invocation, String> {
             "--e2e" => {
                 if mode.is_some() {
                     return Err(
-                        "--e2e, --eval, --train, and --probe are mutually exclusive".to_string()
+                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
+                            .to_string(),
                     );
                 }
                 let prompt = args
@@ -163,7 +171,8 @@ fn try_parse() -> Result<Invocation, String> {
             "--eval" => {
                 if mode.is_some() {
                     return Err(
-                        "--e2e, --eval, --train, and --probe are mutually exclusive".to_string()
+                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
+                            .to_string(),
                     );
                 }
                 mode = Some(Mode::Eval);
@@ -171,7 +180,8 @@ fn try_parse() -> Result<Invocation, String> {
             "--train" => {
                 if mode.is_some() {
                     return Err(
-                        "--e2e, --eval, --train, and --probe are mutually exclusive".to_string()
+                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
+                            .to_string(),
                     );
                 }
                 let path = args
@@ -183,10 +193,20 @@ fn try_parse() -> Result<Invocation, String> {
             "--probe" => {
                 if mode.is_some() {
                     return Err(
-                        "--e2e, --eval, --train, and --probe are mutually exclusive".to_string()
+                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
+                            .to_string(),
                     );
                 }
                 mode = Some(Mode::Probe);
+            }
+            "--models" => {
+                if mode.is_some() {
+                    return Err(
+                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
+                            .to_string(),
+                    );
+                }
+                mode = Some(Mode::Models);
             }
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -236,7 +256,9 @@ fn try_parse() -> Result<Invocation, String> {
     // Resolve the seed: machine modes default to 42, interactive draws
     // a random seed unless one was given.
     let seed = seed.unwrap_or(match mode {
-        Mode::Eval | Mode::E2e { .. } | Mode::Train { .. } | Mode::Probe => DEFAULT_SEED,
+        Mode::Eval | Mode::E2e { .. } | Mode::Train { .. } | Mode::Probe | Mode::Models => {
+            DEFAULT_SEED
+        }
         Mode::Interactive => rand::random::<u64>(),
     });
 
