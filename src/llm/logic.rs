@@ -1,5 +1,4 @@
-use std::cmp::Ordering;
-use std::io::IsTerminal;
+use std::{cmp::Ordering, io::IsTerminal};
 
 use ndarray::{Array1, Array2, Axis};
 

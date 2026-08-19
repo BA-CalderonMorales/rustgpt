@@ -60,7 +60,7 @@ pub fn load_jsonl(path: &str) -> Vec<String> {
         .unwrap_or_else(|error| panic!("failed to read {path}: {error}"));
 
     // Each line is either a bare string or a JSON object with a `text`
-    // field; unparseable lines are skipped.
+    // field; unparsable lines are skipped.
     content
         .lines()
         .filter_map(|line| {

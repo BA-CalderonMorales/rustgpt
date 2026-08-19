@@ -1,0 +1,5 @@
+# Intentional words for the typos spell checker (crate-ci/typos, check.yml).
+# Only words that are deliberate test fixtures or house terms belong here.
+
+[default.extend-words]
+goign = "goign"

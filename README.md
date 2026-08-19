@@ -14,11 +14,12 @@
 
 </div>
 
-A complete language-model implementation — tokenization, embeddings,
-transformer blocks, optimization, training, and generation — built by hand
-with `ndarray` tensors and no machine-learning framework. The goal is a mental
-map of how a transformer works under the hood, not a competitive model:
-every layer is meant to be read, traced, and tested.
+A from‑scratch transformer language model in pure Rust, implemented with
+`ndarray` tensors and no external ML framework. The intent is educational:
+to give an inspectable mental map of how a transformer works, not to produce
+a competitive model. Every layer is designed to be read, traced, and tested.
+The project benefits from an agent harness for exploration and editing
+tasks.
 
 ## Quick Start
 
@@ -99,7 +100,7 @@ training slice.
 | `target/release/llm --tiny --train <file.jsonl> --epochs 1 --model <out.bin>` | Train the 14M-param laptop lane on a JSONL corpus, print trajectory + per-epoch logit profile + samples + eval |
 | `cargo test --test output_properties_test -- --nocapture` | Property suite pass table against `models/watercycle-latest.bin` |
 | `cargo test --test conversation_suite_test -- --nocapture` | Conversation-surface suite (greetings, OOV, junk probes) |
-| `cargo fmt --check` / `cargo clippy --workspace --all-features --all-targets -- -D warnings` | Verify gates |
+| `cargo +nightly fmt --check` / `cargo clippy --workspace --all-features --all-targets -- -D warnings` | Verify gates |
 | `cargo test --all-targets` | Unit, property/invariant, integration, and contract tests |
 | `cargo build --release` | Release binary (also produced by the release workflow) |
 | `make verify` / `make build` / `make demo` | Quality-of-life surface: gates, release build, demo gif re-record |

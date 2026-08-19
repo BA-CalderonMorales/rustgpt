@@ -8,9 +8,8 @@ use llm::{
     transformer::TransformerBlock,
 };
 
-use crate::cli::{Invocation, Mode};
-
 use super::Trace;
+use crate::cli::{Invocation, Mode};
 
 const PRETRAINING_EPOCHS: usize = 100;
 const PRETRAINING_LR: f32 = 0.0005;
@@ -36,7 +35,17 @@ pub(crate) fn load_heldout() -> Vec<(String, String)> {
 
 pub(crate) fn build_llm(dataset: &Dataset, invocation: &Invocation) -> LLM {
     // Derive the load/train targets and whether the mode may build fresh.
-    let model_path = invocation.model.as_deref();
+    // A simple name that is not a file is a catalog id: resolve it to the
+    // artifact path so training modes re-save the resolved artifact.
+    let model_path = invocation.model.as_deref().map(|path| {
+        let looks_like_path = path.contains('/') || path.contains('\\');
+        if !looks_like_path && !std::path::Path::new(path).exists() {
+            super::resolve_model_path(path).unwrap_or_else(|| path.to_string())
+        } else {
+            path.to_string()
+        }
+    });
+    let model_path = model_path.as_deref();
     let train_path = match &invocation.mode {
         Mode::Train { path } => Some(path.as_str()),
         _ => None,

@@ -11,7 +11,7 @@
 .PHONY: fmt clippy test verify
 
 fmt:
-	cargo fmt --check
+	cargo +nightly fmt --check
 
 clippy:
 	cargo clippy --workspace --all-features --all-targets -- -D warnings
@@ -71,3 +71,21 @@ tiny-train:
 
 demo:
 	vhs scripts/demo/tui.tape
+
+# The model catalog: every trained artifact's id, path, family, recipe,
+# seed, eval, and quality, as one JSON object.
+.PHONY: list
+
+list:
+	./target/release/llm --models
+
+# Run a model interactively. MODEL is a catalog id (default: the release
+# winner, watercycle-latest -- the artifact the latest fixes ship in), a
+# checkpoint path, or an external name (qwen runs a local GGUF engine via
+# ollama or llama.cpp when one is installed).
+.PHONY: run
+
+MODEL ?= watercycle-latest
+
+run:
+	scripts/run_model.sh "$(MODEL)"

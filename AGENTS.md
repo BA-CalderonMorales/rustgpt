@@ -182,7 +182,7 @@ the "game" is the math itself:
 ## Verify
 
 ```bash
-cargo fmt --check
+cargo +nightly fmt --check
 cargo clippy --workspace --all-features --all-targets -- -D warnings
 cargo test --all-targets
 cargo run -- --e2e "hello world"   # contract probe only
