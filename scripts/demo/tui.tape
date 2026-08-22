@@ -23,7 +23,7 @@ Sleep 6s
 Type "./target/release/llm --version"
 Enter
 Sleep 2s
-# 1. the release checkpoint: v0.0.8, derived from Cargo.toml, pinned by tests
+# 1. the release checkpoint: v0.0.10, derived from Cargo.toml, pinned by tests
 
 Type "./target/release/llm --models"
 Enter
@@ -85,7 +85,22 @@ Sleep 5s
 #     free completions again. Collapse is a decode phenomenon you can
 #     measure your way out of; the weights take longer.
 
-Type "echo 'you just walked llm --help, top to bottom. go deeper: ./target/release/llm --demo --seed 42'"
+Type "./target/release/llm --demo --seed 42"
+Enter
+Sleep 82s
+# 11. THE FINALE -- the guided tour itself: seven numbered steps, each
+#     closing a dot-bar DONE marker. Data, cleaning, the configuration
+#     table (every setting beside what it decides and where to tweak),
+#     build, the live loss bar, honest held-out scoring, greedy vs tuned,
+#     then it hands over the keyboard. Trains in memory only: nothing
+#     saved, no artifact touched.
+
+Type "exit"
+Enter
+Sleep 3s
+# 12. leave the chat the tour handed over
+
+Type "echo 'you just walked llm --help top to bottom, then built a model live. docs/ is the map.'"
 Enter
 Sleep 4s
-# 11. close on the map: the long-form guided tour is one command away
+# 13. close on the map
