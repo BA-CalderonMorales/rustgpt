@@ -46,6 +46,21 @@ pub struct DecodeStep {
     pub prob: f32,
 }
 
+/// The four decode-time knobs, owned by every sampling surface (tiny-lane
+/// eval, `--ask`, interactive chat). Greedy defaults mean the pinned
+/// greedy stream; any moved knob routes through the sampled stack.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DecodeKnobs {
+    /// Sampling temperature (> 0; 1.0 keeps the greedy pin).
+    pub temperature: f32,
+    /// Nucleus mass cutoff ((0, 1]; 0.0 = off).
+    pub top_p: f32,
+    /// Flat logit penalty per seen token (0.0 = off).
+    pub presence: f32,
+    /// Count-scaled logit penalty divisor (1.0 = off).
+    pub repetition: f32,
+}
+
 /// Per-position logit-regime statistics, averaged over a whole token
 /// stream. The collapse gate is a boolean terminal readout; these means
 /// make the attractor's formation visible as a trajectory before repetition

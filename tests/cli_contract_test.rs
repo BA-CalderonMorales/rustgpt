@@ -19,21 +19,24 @@ fn stderr(output: &std::process::Output) -> String {
 #[test]
 fn help_flags_print_the_same_contract_without_loading_data() {
     let expected = concat!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe | --models]\n",
+        "Usage: llm [--seed <n>] [--model <id-or-path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--fluency <n>] [--eos] [--lr-decay <final_lr>] [--e2e <prompt> | --ask <prompt> | --eval | --train <file.jsonl> | --probe | --models | --demo]\n",
         "\n",
         "Examples:\n",
         "  llm\n",
         "  llm --trace --seed 42\n",
         "  llm --models\n",
-        "  llm --model models/watercycle-latest.bin\n",
+        "  llm --model watercycle-latest\n",
         "  llm --e2e \"hello world\"\n",
         "  llm --eval --seed 42\n",
-        "  llm --model models/mine.bin --eval --seed 42\n",
+        "  llm --model watercycle-latest --eval --seed 42\n",
+        "  llm --model stories-full --ask \"Once upon a time,\"\n",
+        "  llm --demo --seed 42\n",
         "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin\n",
+        "  llm --tiny --train models/tinystories/demo.jsonl --epochs 6 --lr-decay 5e-5 --model models/ts.bin\n",
         "  llm --tiny --eval --model models/ts.bin --fluency 20\n",
         "  llm --tiny --eval --model models/ts.bin --temperature 0.7 --presence 1.5\n",
         "  llm --tiny --eval --model models/ts.bin --temperature 0.7 --top-p 0.8 --presence 1.5\n",
-        "  llm --probe --model models/mine.bin --seed 42\n",
+        "  llm --probe --model stories-full --seed 42\n",
     );
 
     for flag in ["--help", "-h"] {
@@ -202,7 +205,7 @@ fn eval_and_e2e_are_mutually_exclusive() {
     assert_eq!(stdout(&output), "");
     assert_eq!(
         stderr(&output),
-        "error: --e2e, --eval, --train, --probe, and --models are mutually exclusive\nTry 'llm --help' for usage.\n"
+        "error: --ask, --demo, --e2e, --eval, --models, --probe, and --train are mutually exclusive\nTry 'llm --help' for usage.\n"
     );
 }
 
@@ -213,20 +216,41 @@ fn models_and_other_modes_are_mutually_exclusive() {
     assert_eq!(stdout(&output), "");
     assert_eq!(
         stderr(&output),
-        "error: --e2e, --eval, --train, --probe, and --models are mutually exclusive\nTry 'llm --help' for usage.\n"
+        "error: --ask, --demo, --e2e, --eval, --models, --probe, and --train are mutually exclusive\nTry 'llm --help' for usage.\n"
     );
+}
+
+#[test]
+fn ask_demo_and_train_are_mutually_exclusive_with_every_mode() {
+    for arguments in [
+        vec!["--ask", "hi", "--eval"],
+        vec!["--eval", "--ask", "hi"],
+        vec!["--ask", "hi", "--demo"],
+        vec!["--demo", "--train", "x.jsonl"],
+        vec!["--demo", "--models"],
+        vec!["--ask", "hi", "--probe"],
+    ] {
+        let output = run(&arguments, &std::env::temp_dir());
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(
+            stderr(&output),
+            "error: --ask, --demo, --e2e, --eval, --models, --probe, and --train are mutually exclusive\nTry 'llm --help' for usage.\n"
+        );
+    }
 }
 
 #[test]
 fn models_emits_one_json_object_with_the_catalog() {
     let output = run(&["--models"], Path::new(env!("CARGO_MANIFEST_DIR")));
     assert_eq!(output.status.code(), Some(0));
-    assert_eq!(stderr(&output), "");
-    let stdout = stdout(&output);
-    assert_eq!(stdout.lines().count(), 1);
+
+    // stdout is the machine channel: exactly one JSON object.
+    let stdout_text = stdout(&output);
+    assert_eq!(stdout_text.lines().count(), 1);
 
     let response: serde_json::Value =
-        serde_json::from_str(stdout.trim_end()).expect("stdout should be one JSON object");
+        serde_json::from_str(stdout_text.trim_end()).expect("stdout should be one JSON object");
     assert_eq!(response["status"].as_str(), Some("ok"));
     let catalog = response["catalog"]
         .as_array()
@@ -236,6 +260,12 @@ fn models_emits_one_json_object_with_the_catalog() {
         catalog
             .iter()
             .all(|entry| entry["path"].is_string() && entry["seed"].is_u64())
+    );
+
+    // stderr carries the human-readable table.
+    assert!(
+        stderr(&output).contains("ID          Family      Parameters"),
+        "the human table belongs on stderr"
     );
 }
 
@@ -257,6 +287,8 @@ fn trace_is_rejected_outside_interactive_mode() {
         vec!["--trace", "--eval"],
         vec!["--eval", "--trace"],
         vec!["--trace", "--e2e", "hi"],
+        vec!["--trace", "--ask", "hi"],
+        vec!["--trace", "--demo"],
         vec!["--trace", "--probe"],
         vec!["--trace", "--train", "data/pretraining_data.json"],
     ] {
@@ -271,22 +303,26 @@ fn trace_is_rejected_outside_interactive_mode() {
 }
 
 #[test]
-fn temperature_requires_tiny_eval() {
+fn temperature_requires_a_decode_surface() {
     for (arguments, message) in [
         (
-            vec!["--temperature", "0.8"],
-            "error: --temperature requires --tiny --eval\nTry 'llm --help' for usage.\n",
-        ),
-        (
             vec!["--eval", "--temperature", "0.8"],
-            "error: --temperature requires --tiny --eval\nTry 'llm --help' for usage.\n",
+            "error: --temperature requires --tiny --eval, --ask, or interactive chat\nTry 'llm --help' for usage.\n",
         ),
         (
             vec!["--tiny", "--train", "x.jsonl", "--temperature", "0.8"],
-            "error: --temperature requires --tiny --eval\nTry 'llm --help' for usage.\n",
+            "error: --temperature requires --tiny --eval, --ask, or interactive chat\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--demo", "--temperature", "0.8"],
+            "error: --temperature requires --tiny --eval, --ask, or interactive chat\nTry 'llm --help' for usage.\n",
         ),
         (
             vec!["--tiny", "--eval", "--temperature", "0"],
+            "error: --temperature must be positive\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--ask", "hi", "--temperature", "0"],
             "error: --temperature must be positive\nTry 'llm --help' for usage.\n",
         ),
         (
@@ -329,15 +365,11 @@ fn fluency_requires_tiny_eval() {
 }
 
 #[test]
-fn penalties_require_tiny_eval() {
+fn penalties_require_a_decode_surface() {
     for (arguments, message) in [
         (
-            vec!["--presence", "1.5"],
-            "error: --presence and --repetition require --tiny --eval\nTry 'llm --help' for usage.\n",
-        ),
-        (
             vec!["--tiny", "--train", "x.jsonl", "--repetition", "1.1"],
-            "error: --presence and --repetition require --tiny --eval\nTry 'llm --help' for usage.\n",
+            "error: --presence and --repetition require --tiny --eval, --ask, or interactive chat\nTry 'llm --help' for usage.\n",
         ),
         (
             vec!["--tiny", "--eval", "--presence", "-1.0"],
@@ -348,11 +380,11 @@ fn penalties_require_tiny_eval() {
             "error: --repetition must be >= 1.0\nTry 'llm --help' for usage.\n",
         ),
         (
-            vec!["--tiny", "--eval", "--presence", "abc"],
+            vec!["--ask", "hi", "--presence", "abc"],
             "error: invalid presence: abc\nTry 'llm --help' for usage.\n",
         ),
         (
-            vec!["--tiny", "--eval", "--repetition", "xyz"],
+            vec!["--ask", "hi", "--repetition", "xyz"],
             "error: invalid repetition: xyz\nTry 'llm --help' for usage.\n",
         ),
     ] {
@@ -364,11 +396,11 @@ fn penalties_require_tiny_eval() {
 }
 
 #[test]
-fn top_p_requires_tiny_eval() {
+fn top_p_requires_a_decode_surface() {
     for (arguments, message) in [
         (
-            vec!["--top-p", "0.8"],
-            "error: --top-p requires --tiny --eval\nTry 'llm --help' for usage.\n",
+            vec!["--tiny", "--train", "x.jsonl", "--top-p", "0.8"],
+            "error: --top-p requires --tiny --eval, --ask, or interactive chat\nTry 'llm --help' for usage.\n",
         ),
         (
             vec!["--tiny", "--eval", "--top-p", "0"],
@@ -379,7 +411,7 @@ fn top_p_requires_tiny_eval() {
             "error: --top-p must be in (0, 1]\nTry 'llm --help' for usage.\n",
         ),
         (
-            vec!["--tiny", "--eval", "--top-p", "abc"],
+            vec!["--ask", "hi", "--top-p", "abc"],
             "error: invalid top-p: abc\nTry 'llm --help' for usage.\n",
         ),
     ] {
@@ -399,6 +431,214 @@ fn probe_requires_a_checkpoint() {
         stderr(&output),
         "error: --probe requires --model <checkpoint>\n"
     );
+}
+
+#[test]
+fn ask_requires_a_checkpoint_flag() {
+    let output = run(
+        &["--ask", "Once upon a time,"],
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: --ask requires --model <checkpoint>\n"
+    );
+}
+
+#[test]
+fn ask_with_missing_checkpoint_is_an_error_not_a_fallback() {
+    let output = run(
+        &["--model", "does-not-exist.bin", "--ask", "hi"],
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "error: checkpoint not found: does-not-exist.bin\n"
+    );
+}
+
+#[test]
+fn ask_needs_exactly_one_prompt() {
+    for (arguments, message) in [
+        (
+            vec!["--model", "x.bin", "--ask"],
+            "error: --ask requires a prompt\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--ask", "hi", "extra"],
+            "error: mode argument accepts exactly one value\nTry 'llm --help' for usage.\n",
+        ),
+    ] {
+        let output = run(&arguments, &std::env::temp_dir());
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(stderr(&output), message);
+    }
+}
+
+#[test]
+fn eos_and_lr_decay_require_tiny_train() {
+    for (arguments, message) in [
+        (
+            vec!["--tiny", "--eval", "--eos"],
+            "error: --eos requires --tiny --train\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--train", "x.jsonl", "--eos"],
+            "error: --eos requires --tiny --train\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--eval", "--lr-decay", "5e-5"],
+            "error: --lr-decay requires --tiny --train\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--train", "x.jsonl", "--lr-decay", "0"],
+            "error: --lr-decay must be positive\nTry 'llm --help' for usage.\n",
+        ),
+        (
+            vec!["--tiny", "--train", "x.jsonl", "--lr-decay", "abc"],
+            "error: invalid lr-decay: abc\nTry 'llm --help' for usage.\n",
+        ),
+    ] {
+        let output = run(&arguments, &std::env::temp_dir());
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(stdout(&output), "");
+        assert_eq!(stderr(&output), message);
+    }
+}
+
+/// Hand-rolled FNV-1a 64: the artifact-immutability probe needs a stable
+/// content fingerprint without adding a dependency.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+#[test]
+fn ask_emits_one_json_object_and_never_touches_the_checkpoint() {
+    // Build and save a small trained checkpoint, then ask it twice: the
+    // happy path must print exactly one JSON object with the decode block,
+    // and the artifact bytes must be identical before and after both runs
+    // (--ask never trains, never saves).
+    let checkpoint_dir = std::env::temp_dir().join("rustgpt-ask-checkpoint");
+    std::fs::create_dir_all(&checkpoint_dir).unwrap();
+    let path = checkpoint_dir.join("model.bin");
+
+    let data = llm::Dataset::new(
+        String::from("data/pretraining_data.json"),
+        String::from("data/chat_training_data.json"),
+        llm::DatasetType::JSON,
+    );
+    llm::set_seed(21);
+    let mut vocab_set = std::collections::HashSet::new();
+    llm::Vocab::process_text_for_vocab(&data.pretraining_data, &mut vocab_set);
+    llm::Vocab::process_text_for_vocab(&data.chat_training_data, &mut vocab_set);
+    let mut words: Vec<String> = vocab_set.into_iter().collect();
+    words.sort();
+    let refs: Vec<&str> = words.iter().map(String::as_str).collect();
+    let vocab = llm::Vocab::new(refs);
+    let network: Vec<Box<dyn llm::Layer>> = vec![
+        Box::new(llm::Embeddings::new(vocab.clone())),
+        Box::new(llm::transformer::TransformerBlock::new(
+            llm::EMBEDDING_DIM,
+            llm::HIDDEN_DIM,
+        )),
+        Box::new(llm::transformer::TransformerBlock::new(
+            llm::EMBEDDING_DIM,
+            llm::HIDDEN_DIM,
+        )),
+        Box::new(llm::transformer::TransformerBlock::new(
+            llm::EMBEDDING_DIM,
+            llm::HIDDEN_DIM,
+        )),
+        Box::new(llm::output_projection::OutputProjection::new(
+            llm::EMBEDDING_DIM,
+            vocab.words.len(),
+        )),
+    ];
+    let examples: Vec<&str> = data.chat_training_data.iter().map(String::as_str).collect();
+    let mut model = llm::LLM::new(vocab, network);
+    model.train(examples, 2, 0.0005);
+    llm::save(&model, path.to_str().unwrap()).expect("checkpoint save should succeed");
+    let before = fnv1a(&std::fs::read(&path).unwrap());
+
+    let output = run(
+        &[
+            "--model",
+            path.to_str().unwrap(),
+            "--ask",
+            "Once upon a time,",
+            "--temperature",
+            "0.7",
+            "--top-p",
+            "0.8",
+            "--presence",
+            "1.5",
+            "--repetition",
+            "1.1",
+        ],
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let stdout_text = stdout(&output);
+    assert_eq!(stdout_text.lines().count(), 1);
+
+    let response: serde_json::Value =
+        serde_json::from_str(stdout_text.trim_end()).expect("one JSON object");
+    let object = response.as_object().expect("response should be an object");
+    let keys = object.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    assert_eq!(
+        keys,
+        BTreeSet::from([
+            "decode",
+            "output",
+            "prompt",
+            "seed",
+            "status",
+            "total_parameters"
+        ])
+    );
+    assert_eq!(response["status"].as_str(), Some("ok"));
+    assert_eq!(response["prompt"].as_str(), Some("Once upon a time,"));
+    assert_eq!(response["seed"].as_u64(), Some(42));
+    assert!(
+        response["output"]
+            .as_str()
+            .is_some_and(|output| !output.is_empty())
+    );
+    let decode = response["decode"].as_object().expect("decode block");
+    let decode_keys = decode.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    assert_eq!(
+        decode_keys,
+        BTreeSet::from(["presence", "repetition", "temperature", "top_p"])
+    );
+    // f32 knobs widen through the JSON f64 channel; compare within f32
+    // printing precision.
+    let near = |key: &str, expected: f64| {
+        assert!(
+            decode[key]
+                .as_f64()
+                .is_some_and(|value| (value - expected).abs() < 1e-6),
+            "decode.{key} should be ~{expected}"
+        );
+    };
+    near("temperature", 0.7);
+    near("top_p", 0.8);
+    near("presence", 1.5);
+    near("repetition", 1.1);
+
+    let after = fnv1a(&std::fs::read(&path).unwrap());
+    assert_eq!(before, after, "--ask must leave the checkpoint untouched");
+
+    std::fs::remove_dir_all(checkpoint_dir).ok();
 }
 
 #[test]
@@ -483,4 +723,133 @@ fn e2e_with_checkpoint_loads_and_serves_the_saved_model() {
     );
 
     std::fs::remove_dir_all(checkpoint_dir).ok();
+}
+
+/// Save a small trained checkpoint and return its path; the shared setup
+/// of the interactive-session probes.
+fn trained_checkpoint(dir: &str) -> String {
+    let checkpoint_dir = std::env::temp_dir().join(dir);
+    std::fs::create_dir_all(&checkpoint_dir).unwrap();
+    let path = checkpoint_dir.join("model.bin");
+
+    let data = llm::Dataset::new(
+        String::from("data/pretraining_data.json"),
+        String::from("data/chat_training_data.json"),
+        llm::DatasetType::JSON,
+    );
+    llm::set_seed(21);
+    let mut vocab_set = std::collections::HashSet::new();
+    llm::Vocab::process_text_for_vocab(&data.pretraining_data, &mut vocab_set);
+    llm::Vocab::process_text_for_vocab(&data.chat_training_data, &mut vocab_set);
+    let mut words: Vec<String> = vocab_set.into_iter().collect();
+    words.sort();
+    let refs: Vec<&str> = words.iter().map(String::as_str).collect();
+    let vocab = llm::Vocab::new(refs);
+    let network: Vec<Box<dyn llm::Layer>> = vec![
+        Box::new(llm::Embeddings::new(vocab.clone())),
+        Box::new(llm::transformer::TransformerBlock::new(
+            llm::EMBEDDING_DIM,
+            llm::HIDDEN_DIM,
+        )),
+        Box::new(llm::transformer::TransformerBlock::new(
+            llm::EMBEDDING_DIM,
+            llm::HIDDEN_DIM,
+        )),
+        Box::new(llm::transformer::TransformerBlock::new(
+            llm::EMBEDDING_DIM,
+            llm::HIDDEN_DIM,
+        )),
+        Box::new(llm::output_projection::OutputProjection::new(
+            llm::EMBEDDING_DIM,
+            vocab.words.len(),
+        )),
+    ];
+    let examples: Vec<&str> = data.chat_training_data.iter().map(String::as_str).collect();
+    let mut model = llm::LLM::new(vocab, network);
+    model.train(examples, 2, 0.0005);
+    llm::save(&model, path.to_str().unwrap()).expect("checkpoint save should succeed");
+    path.to_str().unwrap().to_string()
+}
+
+#[test]
+fn chat_slash_commands_mutate_only_valid_knobs() {
+    let path = trained_checkpoint("rustgpt-chat-session");
+    let script = "/help\n/config\n/temp abc\n/config\n/bogus\n/temp 0.7\n/top-p 0\n/config\n/reset\n/config\n/exit\n";
+    let mut child = Command::new(env!("CARGO_BIN_EXE_llm"))
+        .arg("--model")
+        .arg(&path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("llm binary should start");
+    use std::io::Write as _;
+    child
+        .stdin
+        .as_mut()
+        .expect("piped stdin")
+        .write_all(script.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().expect("session should finish");
+
+    assert_eq!(output.status.code(), Some(0));
+    let out = String::from_utf8(output.stdout.clone()).unwrap();
+
+    // /help lists the commands.
+    assert!(out.contains("Commands:"), "/help must list commands");
+    assert!(out.contains("/top-p <p>"));
+
+    // A bad value is rejected and leaves the config unchanged.
+    assert!(out.contains("error: 'abc' is not a number (config unchanged)"));
+    // Unknown commands explain themselves.
+    assert!(out.contains("Unknown command '/bogus'."));
+    // Out-of-range knob values are rejected by the same validation.
+    assert!(out.contains("error: top-p must be in (0, 1] (config unchanged)"));
+
+    // Greedy default; sampling after a valid set and in every later
+    // /config until reset; greedy again after reset.
+    assert_eq!(out.matches("config: greedy").count(), 4);
+    assert_eq!(out.matches("config: sampling").count(), 2);
+
+    // The literal end marker never leaks into a rendered answer.
+    for line in out.lines().filter(|l| l.starts_with("Model output:")) {
+        assert!(!line.contains("</s>"), "marker must render clean: {line}");
+    }
+
+    std::fs::remove_dir_all(std::path::Path::new(&path).parent().unwrap()).ok();
+}
+
+#[test]
+fn chat_session_ends_cleanly_at_end_of_input() {
+    let path = trained_checkpoint("rustgpt-chat-eof");
+    let output = run_with_stdin(&["--model", &path], b"What is rain?\n");
+    assert_eq!(output.status.code(), Some(0));
+    let out = stdout(&output);
+    assert!(out.contains("Model output:"), "the prompt must be answered");
+    assert_eq!(
+        out.matches("Exiting interactive mode.").count(),
+        1,
+        "EOF ends the session exactly once"
+    );
+
+    std::fs::remove_dir_all(std::path::Path::new(&path).parent().unwrap()).ok();
+}
+
+fn run_with_stdin(arguments: &[&str], input: &[u8]) -> std::process::Output {
+    use std::io::Write as _;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_llm"))
+        .args(arguments)
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("llm binary should start");
+    child
+        .stdin
+        .as_mut()
+        .expect("piped stdin")
+        .write_all(input)
+        .unwrap();
+    child.wait_with_output().expect("session should finish")
 }

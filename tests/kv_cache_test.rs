@@ -118,7 +118,7 @@ fn tiny_lane_throughput_ratio_is_reported() {
     // (a random tiny model stops at </s> immediately, which measures only
     // prefill); without the artifact the run reports the random-model
     // numbers as an observation, not evidence.
-    let checkpoint = "models/tinystories/ts-13m-s42.bin";
+    let checkpoint = "models/tinystories/stories-full.bin";
     let Some(mut model) = std::path::Path::new(checkpoint)
         .exists()
         .then(|| llm::load(checkpoint).expect("checkpoint loads"))

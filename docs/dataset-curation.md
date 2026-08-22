@@ -175,6 +175,27 @@ bounded run; it reached instruction epoch 90 after completing pretraining.
 These timings show a large practical improvement, but ordinary run-to-run and
 cache noise still applies.
 
+## Free-Open-Data Shortlist (v0.0.8, verified 2026-08-22)
+
+Candidate corpora for future lanes. Licenses were read from each dataset
+card on the date above; nothing here has been downloaded or merged. The
+allow-list (MIT, Apache-2.0, CC-BY, OpenMDW-1.1) is the gate: share-alike
+and non-commercial candidates are recorded with their blocker, never
+merged silently.
+
+| Candidate | Source / license | Lane it would feed | Why not yet merged |
+|---|---|---|---|
+| [roneneldan/TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) | HF; **CDLA-Sharing-1.0** | stories (MERGED -- the `--tiny` lane) | already in use; recorded above |
+| [Salesforce/wikitext](https://huggingface.co/datasets/Salesforce/wikitext) (wikitext-2/103) | HF card: CC BY-SA (tags 3.0 + GFDL; card text cites 4.0) | long-context prose lane | **Share-Alike is outside the allow-list**; would obligate derivative corpus licensing. Blocked until the allow-list itself changes by ADR |
+| [karpathy/tiny_shakespeare](https://huggingface.co/datasets/karpathy/tiny_shakespeare) | HF card records **no license** ("More Information Needed") | dialogue/prose demo lane (small: 1.1 MB, ideal for `--demo`) | license unrecorded = unmergeable under the free-open-data rule even though the underlying plays are public domain. Unblock path: re-source from a public-domain provider that states terms (e.g. Project Gutenberg texts + our own slicing script), then record it |
+| [HuggingFaceH4/no_robots](https://huggingface.co/datasets/HuggingFaceH4/no_robots) (10k human-written chat pairs) | HF card: **CC-BY-NC-4.0** | chat lane upgrade (real multi-turn QA) | **Non-commercial = rejected outright** by rule; recorded so nobody re-litigates it |
+| Local open-weights teacher over TinyStories prefixes (distillation input set) | teacher: Qwen3 family GGUF (**apache-2.0 weights**, run locally via ollama/llama.cpp); inputs: already-licensed TinyStories rows | distillation experiments (teacher completions -> student training rows) | not merged because it does not exist yet: outputs are generated locally at experiment time, carry no third-party data, and only need their own recipe + seed record. This is the cheapest next data move that needs NO new license |
+
+Budget note: the dataset budgets earlier on this page remain ceilings for
+the water-cycle micro-domain; any new lane defines its own budget table in
+this file before its first training row enters `models/tinystories/` or
+`data/`.
+
 ## TinyStories Lane (v0.0.4)
 
 Second corpus arena for the `--tiny` preset. Source:
@@ -217,7 +238,7 @@ reports, against `models/tinystories/heldout.jsonl`:
   true above 0.5. A lane whose greedy output degenerates is reported, not
   hidden.
 
-Measured on the v0.0.4 artifact (`models/tinystories/ts-13m-s42.bin`, seed
+Measured on the v0.0.4 artifact (`models/tinystories/stories-full.bin`, seed
 42): coverage 0.9976; p10/p50/p90 = 5.49 / 5.87 / 6.31; mean CE 5.88;
 collapse gate `collapsed: true` with repetition rate 1.0 (the known dot
 degeneracy, now a number on the formula).

@@ -66,6 +66,65 @@ training or interactive input. It writes one JSON object:
 This interface exists for smoke tests and public-contract evaluation. It does
 not claim that the generated text is semantically correct.
 
+## Single-Shot Ask
+
+```bash
+cargo run --release -- --model stories-full --ask "Once upon a time,"
+cargo run --release -- --model stories-full --ask "Once upon a time," \
+  --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1
+```
+
+`--ask <prompt>` is the raw continuation surface against a LOADED
+checkpoint: the prompt is sent verbatim (no `User:` prefix), the decode
+runs at the invocation's knobs, and exactly one JSON object is printed:
+`status`, `seed`, `total_parameters`, `prompt`, `output`, and a `decode`
+block echoing `{temperature, top_p, presence, repetition}`. It never
+trains and never saves. A missing `--model` flag exits 2; a checkpoint
+that does not exist exits 1; knob violations exit 2 with the exact usage
+message.
+
+## Guided Demo
+
+```bash
+cargo run --release -- --demo --seed 42
+```
+
+`--demo` walks the full pipeline in six narrated stages on the fast demo
+slice: DATA (what a training row looks like) -> VOCABULARY (the word list
+that bounds everything) -> MODEL (parameters as adjustable dials) ->
+TRAINING (epochs, loss = average surprise, live bar) -> EVALUATION
+(held-out scores + collapse gate) -> USE (greedy vs tuned sampling side by
+side on the same starter), then drops into interactive chat. Seeded and
+reproducible; nothing is saved. Requires `models/tinystories/demo.jsonl`
+(rebuild with `python scripts/demo/make_demo_slice.py`). `--tiny --train`
+narrates the same six stages on stderr while keeping its single-JSON
+stdout contract untouched.
+
+## Chat Knobs
+
+The decode knobs (`--temperature`, `--top-p`, `--presence`,
+`--repetition`) are accepted in interactive chat and by `--ask`, not only
+by `--tiny --eval`. Defaults keep the pinned greedy stream byte-identical.
+Inside a session: `/help` lists commands, `/temp <t>` `/top-p <p>`
+`/presence <c>` `/repetition <r>` set knobs (bad values change nothing),
+`/config` echoes them, `/reset` restores greedy, `/exit` (or `exit`, or
+end of input) quits, and a trailing `</s>` renders as a clean end of
+answer instead of leaking the marker.
+
+## Training Levers
+
+```bash
+cargo run --release -- --tiny --train models/tinystories/demo.jsonl \
+  --epochs 6 --eos --lr-decay 5e-5 --seed 42 --model models/tinystories/stories-demo.bin
+```
+
+`--eos` (E11) appends ` </s>` to every training row so termination is a
+learned outcome; `--lr-decay <final_lr>` (W8) rides a linear per-epoch
+schedule from the base LR down to the target (epoch 0 sits exactly on the
+base LR, so omitting the flags reproduces the old recipe byte-for-byte).
+Verdicts with recipes live in docs/learning-directions.md. Both flags
+require `--tiny --train` (exit 2 otherwise).
+
 ## Evaluation Mode
 
 ```bash
@@ -90,8 +149,8 @@ use `cargo build --release` for real measurements.
 ## Checkpoints
 
 ```bash
-cargo run --release -- --model models/mine.bin --eval --seed 42
-cargo run --release -- --model models/mine.bin --e2e "hello world"
+cargo run --release -- --model watercycle-latest --eval --seed 42
+cargo run --release -- --model stories-full --e2e "hello world"
 ```
 
 `--model <path>` loads the checkpoint when the file exists; training modes
@@ -107,7 +166,7 @@ reproducible as the pair (checkpoint or seed) plus its eval JSON.
 ## Tiny-Lane Evaluation
 
 ```bash
-cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin
+cargo run --release -- --tiny --eval --model models/tinystories/stories-full.bin
 ```
 
 The tiny lane's score formula (see `docs/dataset-curation.md`): per-item
@@ -121,21 +180,21 @@ score. The held-out slice (split seed 20260816) is carved by
 ### The temperature knob
 
 ```bash
-cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin --temperature 0.8
+cargo run --release -- --tiny --eval --model models/tinystories/stories-full.bin --temperature 0.8
 ```
 
-`--temperature <t>` (default 1.0, `--tiny --eval` only, exit 2 otherwise)
-selects the gate's and the fluency probe's decoder: at T = 1.0 the
-pinned greedy leg (byte-identical at every T -- the greedy argmax is
-temperature-invariant), at every other T a seeded probability-weighted
-sampling leg that draws from the temperature-scaled softmax (see
-docs/learning-directions.md, W4 verdict). The sampled gate at T = 1.2
-measures 0.000 where greedy is pinned at 1.0.
+`--temperature <t>` (default 1.0; allowed on `--tiny --eval`, `--ask`, and
+interactive chat, exit 2 elsewhere) selects the gate's and the fluency
+probe's decoder: at T = 1.0 the pinned greedy leg (byte-identical at every
+T -- the greedy argmax is temperature-invariant), at every other T a
+seeded probability-weighted sampling leg that draws from the
+temperature-scaled softmax (see docs/learning-directions.md, W4 verdict).
+The sampled gate at T = 1.2 measures 0.000 where greedy is pinned at 1.0.
 
 ### The fluency yardstick
 
 ```bash
-cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin --fluency 20
+cargo run --release -- --tiny --eval --model models/tinystories/stories-full.bin --fluency 20
 ```
 
 `--fluency <n>` (default off, `--tiny --eval` only, exit 2 otherwise) adds

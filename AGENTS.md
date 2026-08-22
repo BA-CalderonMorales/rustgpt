@@ -186,7 +186,7 @@ cargo +nightly fmt --check
 cargo clippy --workspace --all-features --all-targets -- -D warnings
 cargo test --all-targets
 cargo run -- --e2e "hello world"   # contract probe only
-cargo run -- --eval --seed 42      # score formula: held-out eval
-cargo run -- --model models/mine.bin --eval --seed 42   # checkpoint round-trip
+cargo run -- --eval --seed 42      # score formula: held-out eval checkpoint round-trip
+cargo run -- --model stories-full --ask "Once upon a time,"   # single-shot ask (never trains, never saves)
 cargo run -- --tiny --train models/tinystories/train.jsonl --epochs 1   # laptop lane
 ```

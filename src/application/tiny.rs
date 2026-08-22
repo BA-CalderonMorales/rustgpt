@@ -72,7 +72,8 @@ pub(crate) fn tiny_eval(
 /// probability-weighted / nucleus sampling (every other T), with the
 /// optional logit-level anti-repetition penalties applied on either leg.
 /// `rng` is consumed only by the sampling legs, so greedy runs stay
-/// deterministic without one.
+/// deterministic without one. The config-to-leg mapping lives once, in
+/// `llm::generate`.
 fn decode_leg(
     llm: &mut LLM,
     temperature: f32,
@@ -81,24 +82,7 @@ fn decode_leg(
     top_p: f32,
     rng: &mut llm::Xorshift,
 ) -> String {
-    // Penalties active: either coefficient is off its default.
-    let penalized = presence != 0.0 || repetition != 1.0;
-    let nucleus = top_p > 0.0;
-    if temperature == 1.0 {
-        if penalized {
-            llm.predict_penalized(TINY_STARTER, temperature, presence, repetition)
-        } else {
-            llm.predict_scaled(TINY_STARTER, temperature)
-        }
-    } else if nucleus && penalized {
-        llm.predict_nucleus_penalized(TINY_STARTER, temperature, top_p, presence, repetition, rng)
-    } else if nucleus {
-        llm.predict_nucleus(TINY_STARTER, temperature, top_p, rng)
-    } else if penalized {
-        llm.predict_weighted_penalized(TINY_STARTER, temperature, presence, repetition, rng)
-    } else {
-        llm.predict_weighted(TINY_STARTER, temperature, rng)
-    }
+    llm.generate(TINY_STARTER, temperature, top_p, presence, repetition, rng)
 }
 
 /// The decode-quality yardstick over `samples` seeded generations from the

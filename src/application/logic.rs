@@ -1,14 +1,12 @@
-use std::io::Write;
-
 use llm::{
-    DecodeStep, EMBEDDING_DIM, HIDDEN_DIM, LLM, MAX_SEQ_LEN, Vocab,
+    DecodeKnobs, DecodeStep, EMBEDDING_DIM, HIDDEN_DIM, LLM, MAX_SEQ_LEN, Vocab,
     dataset_loader::{Dataset, DatasetType},
     embeddings::Embeddings,
     output_projection::OutputProjection,
     transformer::TransformerBlock,
 };
 
-use super::Trace;
+use super::{Trace, chat, train_lm};
 use crate::cli::{Invocation, Mode};
 
 const PRETRAINING_EPOCHS: usize = 100;
@@ -160,6 +158,9 @@ pub(crate) fn run_headless(invocation: &Invocation, dataset: &Dataset, llm: &mut
         Mode::E2e { prompt } => {
             run_e2e(prompt.clone(), llm);
         }
+        Mode::Ask { prompt } => {
+            run_ask(prompt.clone(), llm, invocation);
+        }
         Mode::Eval => {
             if invocation.tiny {
                 crate::application::run_tiny_eval(
@@ -175,12 +176,7 @@ pub(crate) fn run_headless(invocation: &Invocation, dataset: &Dataset, llm: &mut
             }
         }
         Mode::Train { path } => {
-            run_training_lm(
-                path.as_str(),
-                llm,
-                invocation.model.as_deref(),
-                invocation.epochs,
-            );
+            train_lm::run_training_lm(path.as_str(), llm, invocation.model.as_deref(), invocation);
         }
         Mode::Probe => {
             if invocation.model.is_none() {
@@ -195,65 +191,70 @@ pub(crate) fn run_headless(invocation: &Invocation, dataset: &Dataset, llm: &mut
         Mode::Models => {
             unreachable!("--models has its own early dispatch");
         }
+        Mode::Demo => {
+            unreachable!("--demo has its own early dispatch");
+        }
     }
 }
 
-pub(crate) fn run_interactive(invocation: &Invocation, dataset: &Dataset, llm: &mut LLM) {
-    let trace = Trace::new(invocation.trace);
-    run_training_and_interactive(dataset, llm, invocation.model.as_deref(), &trace);
-}
-
-fn run_training_lm(path: &str, llm: &mut LLM, model_path: Option<&str>, epochs: usize) {
-    // Load the corpus; a degenerate file is a hard error.
-    let texts = llm::load_jsonl(path);
-    if texts.len() < 2 {
-        eprintln!("error: --train needs at least 2 lines in {path}");
-        std::process::exit(1);
+/// `--ask`: one verbatim prompt against a loaded checkpoint, decoded at
+/// the invocation's knobs; never trains, never saves. The raw continuation
+/// surface for story models (interactive chat keeps its "User:" prefix).
+fn run_ask(prompt: String, llm: &mut LLM, invocation: &Invocation) {
+    // A checkpoint is required and was already resolved by build_llm;
+    // a missing --model flag is a usage error (exit 2).
+    if invocation.model.is_none() {
+        eprintln!("error: --ask requires --model <checkpoint>");
+        std::process::exit(2);
     }
-    eprintln!(
-        "=== LANGUAGE MODEL TRAINING === {} stories, {} epochs, lr {}",
-        texts.len(),
-        epochs,
-        PRETRAINING_LR
+
+    // One seeded decode at the requested knobs.
+    let mut rng = llm::Xorshift::new(llm::seed());
+    let output = llm.generate(
+        &prompt,
+        invocation.temperature,
+        invocation.top_p,
+        invocation.presence,
+        invocation.repetition,
+        &mut rng,
     );
 
-    // Train, sampling the held-out logit-regime profile every epoch: the
-    // continuous instrument that makes collapse onset visible. Then persist
-    // the checkpoint.
-    let examples: Vec<&str> = texts.iter().map(String::as_str).collect();
-    let profile_stories = crate::application::tiny_heldout_stories();
-    let profile_texts: Vec<&str> = profile_stories.iter().map(String::as_str).collect();
-    let (losses, profile) =
-        llm.train_with_profile(examples, epochs, PRETRAINING_LR, true, &profile_texts);
-    save_checkpoint(llm, model_path);
-
-    // Sample a few fixed starters from the trained lane.
-    let starters = ["Once upon a time,", "The sun", "Why did the"];
-    let samples: Vec<serde_json::Value> = starters
-        .iter()
-        .map(|starter| {
-            serde_json::json!({
-                "prompt": starter,
-                "generated": llm.predict_cached(starter),
-            })
-        })
-        .collect();
-
-    // Exactly one JSON object: trajectory, the per-epoch logit profile,
-    // samples, and the lane's eval.
+    // Exactly one JSON object with the decode block.
     println!(
         "{}",
         serde_json::json!({
             "status": "ok",
             "seed": llm::seed(),
             "total_parameters": llm.total_parameters(),
-            "stories": texts.len(),
-            "epochs": epochs,
-            "trajectory": { "loss": losses },
-            "profile": llm::profile_json(&profile),
-            "samples": samples,
-            "eval": crate::application::tiny_eval(llm, 1.0, 0.0, 1.0, 0.0),
+            "prompt": prompt,
+            "output": output,
+            "decode": {
+                "temperature": invocation.temperature,
+                "top_p": invocation.top_p,
+                "presence": invocation.presence,
+                "repetition": invocation.repetition,
+            },
         })
+    );
+}
+
+pub(crate) fn run_interactive(invocation: &Invocation, dataset: &Dataset, llm: &mut LLM) {
+    let trace = Trace::new(invocation.trace);
+
+    // The chat's starting decode config comes from the invocation flags;
+    // defaults keep the pinned greedy stream byte-identical.
+    let mut knobs = DecodeKnobs {
+        temperature: invocation.temperature,
+        top_p: invocation.top_p,
+        presence: invocation.presence,
+        repetition: invocation.repetition,
+    };
+    run_training_and_interactive(
+        dataset,
+        llm,
+        invocation.model.as_deref(),
+        &trace,
+        &mut knobs,
     );
 }
 
@@ -424,7 +425,7 @@ fn run_training_and_eval(dataset: &Dataset, llm: &mut LLM, model_path: Option<&s
     );
 }
 
-fn save_checkpoint(llm: &mut LLM, model_path: Option<&str>) {
+pub(crate) fn save_checkpoint(llm: &mut LLM, model_path: Option<&str>) {
     if let Some(path) = model_path {
         llm::save(llm, path).unwrap_or_else(|error| {
             eprintln!("error: failed to save checkpoint {path}: {error}");
@@ -469,7 +470,7 @@ fn trace_startup(dataset: &Dataset, llm: &LLM, model_path: Option<&str>, trace: 
 
 /// Per-turn trace block: tokenization, pipeline map, one line per decoded
 /// step, then the stop reason.
-fn trace_turn(llm: &LLM, formatted_input: &str, steps: &[DecodeStep], trace: &Trace) {
+pub(crate) fn trace_turn(llm: &LLM, formatted_input: &str, steps: &[DecodeStep], trace: &Trace) {
     let decoded: Vec<String> = llm
         .tokenize(formatted_input)
         .iter()
@@ -503,6 +504,7 @@ fn run_training_and_interactive(
     llm: &mut LLM,
     model_path: Option<&str>,
     trace: &Trace,
+    knobs: &mut DecodeKnobs,
 ) {
     // Startup trace: which domain shaped this session.
     trace_startup(dataset, llm, model_path, trace);
@@ -515,14 +517,17 @@ fn run_training_and_interactive(
         MAX_SEQ_LEN, EMBEDDING_DIM, HIDDEN_DIM
     );
     println!("Total parameters: {}", llm.total_parameters());
-    println!("Seed: {}", llm::seed());
+    println!(
+        "Seed: {} (pass --seed <n> to reproduce a session)",
+        llm::seed()
+    );
 
     // A loaded checkpoint is the use surface: chat directly against the
     // artifact, no training, no re-save (the artifact stays the artifact).
     if let Some(path) = model_path.filter(|path| std::path::Path::new(path).exists()) {
         println!("\n=== LOADED MODEL (no training, no re-save) ===");
         println!("Checkpoint: {path}");
-        chat_loop(llm, trace);
+        chat::chat_loop(llm, trace, knobs);
         return;
     }
 
@@ -565,43 +570,5 @@ fn run_training_and_interactive(
     println!("======================\n");
 
     // Chat loop until "exit".
-    chat_loop(llm, trace);
-}
-
-/// Prompt loop until "exit": the shared chat surface of the training demo
-/// and the loaded-model use path. Traced turns capture every decode step;
-/// the default path keeps the untraced `predict` surface untouched.
-fn chat_loop(llm: &mut LLM, trace: &Trace) {
-    println!("\n--- Interactive Mode ---");
-    println!("Type a prompt and press Enter to generate text.");
-    println!("Type 'exit' to quit.");
-    let mut input = String::new();
-    loop {
-        // Read the next prompt.
-        input.clear();
-        print!("\nEnter prompt: ");
-        std::io::stdout().flush().unwrap();
-        std::io::stdin()
-            .read_line(&mut input)
-            .expect("Failed to read input");
-
-        // The exit word ends the session.
-        let trimmed_input = input.trim();
-        if trimmed_input.eq_ignore_ascii_case("exit") {
-            println!("Exiting interactive mode.");
-            break;
-        }
-
-        // Traced turns capture every decode step; the default path keeps
-        // the untraced `predict` surface untouched.
-        let formatted_input = format!("User: {trimmed_input}");
-        let prediction = if trace.on {
-            let (output, steps) = llm.predict_with_steps(&formatted_input);
-            trace_turn(llm, &formatted_input, &steps, trace);
-            output
-        } else {
-            llm.predict(&formatted_input)
-        };
-        println!("Model output: {prediction}");
-    }
+    chat::chat_loop(llm, trace, knobs);
 }

@@ -1,11 +1,13 @@
 /// The trained-model catalog: the durable record of what was made and how
 /// (path, family, parameters, seed, recipe, eval). `--models` serves it as
-/// a human‑readable table; the probe never loads data or builds a model.
+/// one JSON object on stdout (the machine contract) with the human-readable
+/// table on stderr; the probe never loads data or builds a model.
 pub(crate) fn run_models() {
     let catalog = load_catalog();
     if let Some(arr) = catalog.as_array() {
-        println!("ID          Family      Parameters   Path                Quality");
-        println!("---------------------------------------------------------------");
+        // Human table on stderr: id, family, parameters, path, quality.
+        eprintln!("ID          Family      Parameters   Path                Quality");
+        eprintln!("---------------------------------------------------------------");
         for entry in arr {
             let id = entry["id"].as_str().unwrap_or("");
             let family = entry["family"].as_str().unwrap_or("");
@@ -23,7 +25,7 @@ pub(crate) fn run_models() {
                         .join(", ")
                 })
                 .unwrap_or_else(|| "-".to_string());
-            println!(
+            eprintln!(
                 "{:12} {:12} {:12} {:25} {}",
                 id, family, params, path_display, quality
             );
@@ -32,6 +34,16 @@ pub(crate) fn run_models() {
         eprintln!("error: catalog is not an array");
         std::process::exit(1);
     }
+
+    // Exactly one JSON object on stdout: the machine contract.
+    println!(
+        "{}",
+        serde_json::json!({
+            "status": "ok",
+            "seed": llm::seed(),
+            "catalog": catalog,
+        })
+    );
 }
 
 /// The catalog's raw JSON array; a missing or broken catalog is a hard
@@ -67,8 +79,12 @@ mod tests {
             Some("models/watercycle-latest.bin")
         );
         assert_eq!(
-            resolve_model_path("ts-13m-s42").as_deref(),
-            Some("models/tinystories/ts-13m-s42.bin")
+            resolve_model_path("stories-full").as_deref(),
+            Some("models/tinystories/stories-full.bin")
+        );
+        assert_eq!(
+            resolve_model_path("stories-demo").as_deref(),
+            Some("models/tinystories/stories-demo.bin")
         );
     }
 

@@ -22,7 +22,7 @@ Sleep 2s
 Type "./target/release/llm --version"
 Enter
 Sleep 2s
-# 1. the release checkpoint: v0.0.7, seeded, version contract pinned by tests
+# 1. the release checkpoint: v0.0.8, seeded, version contract pinned by tests
 
 Type "./target/release/llm --models | python3 -m json.tool | head -30"
 Enter
@@ -34,6 +34,12 @@ Type "./target/release/llm --e2e 'hello world'"
 Enter
 Sleep 3s
 # 3. the contract probe: one JSON object, deterministic across processes
+
+Type "./target/release/llm --model stories-full --ask 'Once upon a time,' --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1"
+Enter
+Sleep 8s
+# 3b. the v0.0.8 use surface: single-shot ask against a loaded artifact at
+#     the Qwen-stack decode recipe -- knobs finally reachable by humans
 
 Type "printf 'yo!\nhello!\nwater?\nexit\n' | ./target/release/llm --trace --model models/watercycle-latest.bin --seed 42 2>&1 | tail -30"
 Enter
@@ -48,13 +54,13 @@ Sleep 14s
 # 5. the micro arena truth table: train both phases, score the four held-out
 #    prompts, ship the trajectory -- the same 385K-param model, end to end
 
-Type "./target/release/llm --tiny --train models/tinystories/demo.jsonl --epochs 1 --seed 42 --model models/tinystories/demo.bin | python3 -m json.tool | head -60"
+Type "./target/release/llm --tiny --train models/tinystories/demo.jsonl --epochs 1 --seed 42 --model models/tinystories/stories-demo.bin | python3 -m json.tool | head -60"
 Enter
 Sleep 50s
 # 6. the laptop lane: 7.3M params trained on real story text, checkpoint
 #    saved, trajectory, the per-epoch logit profile, and the collapse gate
 
-Type "./target/release/llm --tiny --eval --model models/tinystories/ts-13m-s42.bin --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1 --fluency 20 | python3 scripts/demo/show_gate.py"
+Type "./target/release/llm --tiny --eval --model models/tinystories/stories-full.bin --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1 --fluency 20 | python3 scripts/demo/show_gate.py"
 Enter
 Sleep 60s
 # 7. freeze on the headline: the collapse gate, defeated. Greedy decode is

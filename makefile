@@ -43,7 +43,7 @@ eval:
 # (override the path with MODEL=<path>).
 .PHONY: eval-model
 
-MODEL ?= models/mine.bin
+MODEL ?= models/watercycle-local.bin
 
 eval-model:
 	cargo run --release -- --model $(MODEL) --eval --seed 42
@@ -52,7 +52,7 @@ eval-model:
 .PHONY: tiny-eval
 
 tiny-eval:
-	cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin
+	cargo run --release -- --tiny --eval --model models/tinystories/stories-full.bin
 
 # Tiny-lane training (override with FILE=<jsonl> EPOCHS=<n> MODEL=<path>;
 # the default corpus is the 40k TinyStories lane, 1 epoch).
@@ -60,7 +60,7 @@ tiny-eval:
 
 FILE ?= models/tinystories/train.jsonl
 EPOCHS ?= 1
-TINY_MODEL ?= models/tinystories/ts.bin
+TINY_MODEL ?= models/tinystories/stories-trained.bin
 
 tiny-train:
 	cargo run --release -- --tiny --train $(FILE) --epochs $(EPOCHS) --seed 42 --model $(TINY_MODEL)

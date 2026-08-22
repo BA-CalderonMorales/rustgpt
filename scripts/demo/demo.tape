@@ -71,7 +71,7 @@ Sleep 18s
 Type "echo '-- step 6: the laptop lane -- 14M params on TinyStories, its own score formula'"
 Enter
 Sleep 2s
-Type "./target/release/llm --tiny --eval --model models/tinystories/ts-13m-s42.bin | python3 -m json.tool | head -30"
+Type "./target/release/llm --tiny --eval --model models/tinystories/stories-full.bin | python3 -m json.tool | head -30"
 Enter
 Sleep 10s
 # 6. the second lane: held-out CE percentiles, coverage, collapse gate

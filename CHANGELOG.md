@@ -5,6 +5,107 @@ produced: score, trajectory, and artifacts. The top section becomes the
 GitHub release body (see `.github/workflows/release.yml`), so the public
 record and the repo history are the same document.
 
+## [0.0.8] - 2026-08-22
+
+The use-surface release, aimed at Qwen3-0.6B. The 0.0.7 decode win was
+unreachable by humans -- every knob was welded to `--tiny --eval`, so
+loading the flagship and typing a prompt still printed 80 periods. This
+release moves the knobs to where users are, teaches the model to stop,
+gives training a schedule, and narrates the whole pipeline for a curious
+beginner. One contract drift is also repaired: `--models` prints its
+machine JSON on stdout again (the human table moved to stderr), matching
+the pinned one-object rule.
+
+Surfaces. `--ask <prompt>`: single-shot raw continuation against a loaded
+checkpoint (prompt sent verbatim; never trains, never saves -- the
+checkpoint's FNV-1a hash is asserted unchanged by the contract test); one
+JSON object carrying `status`, `seed`, `total_parameters`, `prompt`,
+`output`, and a `decode` block echoing `{temperature, top_p, presence,
+repetition}`. Interactive chat accepts the decode knobs at launch and in
+session via slash commands (`/help`, `/temp`, `/top-p`, `/presence`,
+`/repetition`, `/config`, `/reset`, `/exit`); bad values mutate nothing;
+a trailing `</s>` renders as a clean end of answer instead of leaking the
+marker; closed stdin ends the session instead of spinning. The chat
+surface split into `src/application/chat.rs`. `--demo`: a guided six-stage
+novice tour (data -> vocabulary -> model -> training -> evaluation ->
+use) on the 300-story slice, ending greedy-vs-tuned side by side on the
+same starter, then chat; seeded, reproducible, saves nothing.
+`--tiny --train` now narrates the same six stages on stderr while stdout
+stays the single machine JSON.
+
+Decode engine. `llm::generate_with_steps` unifies every decode leg behind
+one dispatch (greedy pin at T=1.0 without knobs; penalties before the
+softmax; nucleus or probability-weighted sampling otherwise) with an
+optional per-step capture (`DecodeStep{token, prob}`). Parity is pinned:
+captured streams equal the recompute `predict_*` family token-for-token,
+greedy argmax stays temperature-invariant over a seeded prompt pool, and
+the full tiny-lane eval JSON is byte-identical to the pre-release binary
+on both legs (verified old-vs-new on stories-full). New property tests
+(hand-rolled seeded generators): capture parity across configs, knob
+state machine (valid sets move exactly their own field; invalid move
+nothing), and black-box chat-session probes.
+
+Training levers (seed 42, demo slice, 6 epochs each, fresh init):
+
+| run | loss | held-out CE p50 | greedy gate |
+|---|---|---|---|
+| control (constant 5e-4) | 6.15 -> 5.23, U-shape | 6.66 | 1.000 |
+| W8 decay -> 5e-5 | 6.15 -> 5.06, monotone | 6.47 | 0.979 |
+| E11 `--eos` | 6.12 -> 5.23 | 6.80 (+0.14) | 1.000 |
+| combo (eos + decay) = new stories-demo | 6.12 -> 5.02, monotone | **6.40** | 0.990 |
+
+W8 verdict: SPLIT -- stability half LANDED (monotone curve where constant
+LR bends up; CE improves 0.18), repetition half FALSIFIED (0.979 is
+nowhere near the gate). E11 verdict: LANDED -- termination becomes a
+learned outcome for the first time (mean sampled completion length 3.0
+vs the 123-token cap; CE inside the predeclared +0.25 margin); greedy
+still ignores `</s>` (gate 1.0), confirming the collapse is argmax-level,
+not labelable from below; side effect measured: termination overshoot
+(3-token stubs), which decay moderates (combo: 19.4-token completions,
+repetition-free 0.45, distinct-1 0.823 under the stack). Catalog refreshed
+for stories-demo under the combo recipe.
+
+Us-vs-Qwen3-0.6B gap table (same yardsticks; Qwen3-0.6B GGUF via
+llama.cpp on this laptop; our numbers seed 42):
+
+| yardstick | rustgpt stories-full (14.2M) | Qwen3-0.6B (GGUF) |
+|---|---|---|
+| held-out CE, 256 stories | 5.88 nats/token (PPL ~358) | 2.61 nats/token (PPL 13.5) |
+| greedy repetition rate (96 tok) | 1.000 (collapsed) | 0.000 |
+| stack distinct-1 / rep-free | 0.701 / 0.65 | 0.709 / 0.70 |
+| stack completion len / sentences | 123-cap / 7.05 | 121.5 / 7.55 |
+
+Reading the scoreboard honestly: at the DECODE layer we are at near-parity
+with Qwen3-0.6B (distinct-1 0.70 vs 0.71, repetition-free 0.65 vs 0.70);
+at the WEIGHTS layer the chasm is intact -- Qwen's GREEDY decode is clean
+(0.000) while ours collapses (1.000), and it holds 2.6 nats/token against
+our 5.88. The knobs route around the attractor; they do not remove it --
+that is what 0.4B extra parameters plus subword tokenization buys. Metric
+humility note: even Qwen's "clean" greedy soft-loops at n-gram level
+("He had a son named Mew" x4); adjacent-pair metrics score it perfect,
+which is exactly why `is_degenerate`'s n-gram window exists.
+
+Perspective (perception evidence only, never merged into scores): the
+codex-cli human-eyes loop was quota-blocked ("You've hit your usage limit
+... try again at Sep 10th, 2026"), so the cold-viewer critique ran through
+the local open-weights oracle (qwen3.8:27b via ollama), same prompts,
+quoted verbatim. BEFORE (worst three): "--models leaks a raw internal-QA
+JSON blob"; "--help is an undifferentiated wall of 20+ flags"; "The model's
+output leaks a raw special token ... `Assistant : Heavy water droplets ...
+rain . </s>`". AFTER: named wins -- "Each knob gets a one-line
+plain-English gloss", "I always know which setting produced the text I'm
+staring at", "`/reset` removes ambiguity"; remaining worst: "--models is
+unusable for model selection" (catalog jargon stays deliberate: it is the
+evidence record; stderr keeps the human table), "1.0 = greedy inverts the
+standard convention" (fixed: help now reads "unscaled -- greedy while no
+other knob moves"), and "no A/B surface" (answered by `--demo` stage 6).
+Demo comprehension check, played as a novice who never studied ML: token
+("a whole chunk from a fixed menu"), epoch ("one full read of every
+story"), loss ("how surprised ... on average") all answered correctly; the
+dual-instrument point landed ("skipping one would have made the model look
+way better than it is"); two copy defects found and fixed in this release:
+"teacher-forced" was used undefined, and "p50" dropped unexplained.
+
 ## [0.0.7] - 2026-08-16
 
 The quality release: from boolean gate to measurable fluency. Greedy decode

@@ -15,5 +15,7 @@ pub use checkpoint::{load, save};
 pub use configuration::{Config, EMBEDDING_DIM, HIDDEN_DIM, MAX_SEQ_LEN, Xorshift, seed, set_seed};
 pub use dataset_loader::{Dataset, DatasetType, load_jsonl};
 pub use embeddings::Embeddings;
-pub use llm::{AnswerScore, DecodeStep, FluencyScore, LLM, Layer, LogitProfile, profile_json};
+pub use llm::{
+    AnswerScore, DecodeKnobs, DecodeStep, FluencyScore, LLM, Layer, LogitProfile, profile_json,
+};
 pub use vocab::Vocab;

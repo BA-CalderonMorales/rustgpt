@@ -2,7 +2,7 @@ use std::{cmp::Ordering, io::IsTerminal};
 
 use ndarray::{Array1, Array2, Axis};
 
-use super::{AnswerScore, DecodeStep, FluencyScore, LLM, Layer, LogitProfile};
+use super::{AnswerScore, DecodeKnobs, DecodeStep, FluencyScore, LLM, Layer, LogitProfile};
 
 /// Literal answer for prompts whose tokens are all outside the vocabulary.
 /// The CLI contract pins this string: out-of-vocabulary input must never
@@ -10,6 +10,11 @@ use super::{AnswerScore, DecodeStep, FluencyScore, LLM, Layer, LogitProfile};
 pub const UNKNOWN_ANSWER: &str = "Assistant : I do not know that word . </s>";
 /// Literal answer for prompts that exceed the model's sequence limit.
 const TRUNCATED_ANSWER: &str = "Assistant : The input is too long . </s>";
+
+/// One decode-step selector: sees the temperature-scaled logits row and
+/// the generated-so-far, returns the chosen token and its probability
+/// under the final adjusted distribution.
+type SelectFn<'a> = dyn FnMut(&Array2<f32>, &[usize]) -> (usize, f32) + 'a;
 use crate::{
     EMBEDDING_DIM, Embeddings, HIDDEN_DIM, MAX_SEQ_LEN, Vocab, Xorshift,
     output_projection::OutputProjection, transformer::TransformerBlock,
@@ -197,14 +202,17 @@ impl LLM {
     /// Cached decode with a pluggable token selector: prefill fills every
     /// block's K/V cache in one pass, then each step computes only the
     /// newest token's attention row and asks `select` for the next token.
-    /// The greedy selector's output is byte-identical to the recompute
-    /// path (pinned by tests/kv_cache_test.rs); the weighted selector is
-    /// the probability-sampling leg.
+    /// The selector returns `(token, p(token))` under the final adjusted
+    /// distribution; when `capture` is given, every step appends a
+    /// `DecodeStep`, so sampling knobs work outside `--tiny --eval`. The
+    /// greedy selector's output is byte-identical to the recompute path
+    /// (pinned by tests/kv_cache_test.rs).
     fn decode_cached(
         &mut self,
         text: &str,
         temperature: f32,
-        select: &mut dyn FnMut(&Array2<f32>, &[usize]) -> usize,
+        mut capture: Option<&mut Vec<DecodeStep>>,
+        select: &mut SelectFn<'_>,
     ) -> Vec<usize> {
         // Tokenize and guard the degenerate prompts, as the recompute path.
         let mut tokenized = self.tokenize(text);
@@ -258,7 +266,13 @@ impl LLM {
                 break;
             }
             let scaled = &input * (1.0 / temperature);
-            let next_token = select(&scaled, &output_tokens);
+            let (next_token, prob) = select(&scaled, &output_tokens);
+            if let Some(steps) = capture.as_deref_mut() {
+                steps.push(DecodeStep {
+                    token: next_token,
+                    prob,
+                });
+            }
             output_tokens.push(next_token);
             tokenized.push(next_token);
             if next_token == self.vocab.encode("</s>").unwrap() {
@@ -280,9 +294,10 @@ impl LLM {
         let mut greedy = |logits: &Array2<f32>, _generated: &[usize]| {
             let probs = Self::softmax(logits);
             let tokens = Self::greedy_decode(&probs);
-            tokens[tokens.len() - 1]
+            let token = tokens[tokens.len() - 1];
+            (token, probs[[0, token]])
         };
-        self.decode_cached(text, temperature, &mut greedy)
+        self.decode_cached(text, temperature, None, &mut greedy)
     }
 
     /// Greedy prediction through the cached decode path; identical string
@@ -303,6 +318,65 @@ impl LLM {
         self.answer_string(text, &output_tokens)
     }
 
+    /// The one dispatch for every decode surface outside the eval formula:
+    /// T=1.0 with no knobs keeps the pinned greedy leg; penalties act on
+    /// the scaled logits before the softmax; T != 1.0 samples (nucleus
+    /// when top-p is on, probability-weighted otherwise). Byte-identical
+    /// to the corresponding `predict_*` method at every config (pinned by
+    /// tests/decode_capture_test.rs).
+    pub fn generate(
+        &mut self,
+        text: &str,
+        temperature: f32,
+        top_p: f32,
+        presence: f32,
+        repetition: f32,
+        rng: &mut Xorshift,
+    ) -> String {
+        let (output, _) =
+            self.generate_with_steps(text, temperature, top_p, presence, repetition, rng);
+        output
+    }
+
+    /// Same generation as `generate`, plus one captured `DecodeStep` per
+    /// generated token (token and its probability under the final adjusted
+    /// distribution). The capture never changes the token stream.
+    pub fn generate_with_steps(
+        &mut self,
+        text: &str,
+        temperature: f32,
+        top_p: f32,
+        presence: f32,
+        repetition: f32,
+        rng: &mut Xorshift,
+    ) -> (String, Vec<DecodeStep>) {
+        // One selector carrying the whole stack; each branch returns the
+        // chosen token and its probability under the final adjusted
+        // distribution. Greedy at T=1.0 touches no rng-consuming branch,
+        // so greedy runs stay seed-free; penalties act before the softmax,
+        // and nucleus truncates after it.
+        let mut select = |logits: &Array2<f32>, generated: &[usize]| -> (usize, f32) {
+            let adjusted = Self::apply_penalties(logits, generated, presence, repetition);
+            let probs = Self::softmax(&adjusted);
+            if temperature == 1.0 {
+                let tokens = Self::greedy_decode(&probs);
+                let token = tokens[tokens.len() - 1];
+                (token, probs[[0, token]])
+            } else if top_p > 0.0 {
+                let token = Self::nucleus_draw(&probs, top_p, rng);
+                (token, probs[[0, token]])
+            } else {
+                let token = Self::weighted_draw(&probs, rng);
+                (token, probs[[0, token]])
+            }
+        };
+
+        // The capture rides along without changing any decision.
+        let mut steps = Vec::new();
+        let output_tokens = self.decode_cached(text, temperature, Some(&mut steps), &mut select);
+        (self.answer_string(text, &output_tokens), steps)
+    }
+
     /// Probability-weighted temperature sampling through the cached path:
     /// each step draws from the temperature-scaled softmax distribution, so
     /// every token is emitted with exactly its model-given probability
@@ -311,9 +385,10 @@ impl LLM {
     /// semantics of `predict_scaled` are untouched.
     pub fn predict_weighted(&mut self, text: &str, temperature: f32, rng: &mut Xorshift) -> String {
         let output_tokens =
-            self.decode_cached(text, temperature, &mut |logits: &Array2<f32>, _| {
+            self.decode_cached(text, temperature, None, &mut |logits: &Array2<f32>, _| {
                 let probs = Self::softmax(logits);
-                Self::weighted_draw(&probs, rng)
+                let token = Self::weighted_draw(&probs, rng);
+                (token, probs[[0, token]])
             });
         self.answer_string(text, &output_tokens)
     }
@@ -335,11 +410,13 @@ impl LLM {
         let output_tokens = self.decode_cached(
             text,
             temperature,
+            None,
             &mut |logits: &Array2<f32>, generated: &[usize]| {
                 let adjusted = Self::apply_penalties(logits, generated, presence, repetition);
                 let probs = Self::softmax(&adjusted);
                 let tokens = Self::greedy_decode(&probs);
-                tokens[tokens.len() - 1]
+                let token = tokens[tokens.len() - 1];
+                (token, probs[[0, token]])
             },
         );
         self.answer_string(text, &output_tokens)
@@ -358,9 +435,10 @@ impl LLM {
         rng: &mut Xorshift,
     ) -> String {
         let output_tokens =
-            self.decode_cached(text, temperature, &mut |logits: &Array2<f32>, _| {
+            self.decode_cached(text, temperature, None, &mut |logits: &Array2<f32>, _| {
                 let probs = Self::softmax(logits);
-                Self::nucleus_draw(&probs, top_p, rng)
+                let token = Self::nucleus_draw(&probs, top_p, rng);
+                (token, probs[[0, token]])
             });
         self.answer_string(text, &output_tokens)
     }
@@ -381,10 +459,12 @@ impl LLM {
         let output_tokens = self.decode_cached(
             text,
             temperature,
+            None,
             &mut |logits: &Array2<f32>, generated: &[usize]| {
                 let adjusted = Self::apply_penalties(logits, generated, presence, repetition);
                 let probs = Self::softmax(&adjusted);
-                Self::nucleus_draw(&probs, top_p, rng)
+                let token = Self::nucleus_draw(&probs, top_p, rng);
+                (token, probs[[0, token]])
             },
         );
         self.answer_string(text, &output_tokens)
@@ -404,10 +484,12 @@ impl LLM {
         let output_tokens = self.decode_cached(
             text,
             temperature,
+            None,
             &mut |logits: &Array2<f32>, generated: &[usize]| {
                 let adjusted = Self::apply_penalties(logits, generated, presence, repetition);
                 let probs = Self::softmax(&adjusted);
-                Self::weighted_draw(&probs, rng)
+                let token = Self::weighted_draw(&probs, rng);
+                (token, probs[[0, token]])
             },
         );
         self.answer_string(text, &output_tokens)
@@ -425,7 +507,7 @@ impl LLM {
         lr: f32,
         progress_to_stderr: bool,
     ) -> Vec<f32> {
-        self.train_impl(data, epochs, lr, progress_to_stderr, None)
+        self.train_impl(data, epochs, lr, progress_to_stderr, None, None)
             .0
     }
 
@@ -441,7 +523,37 @@ impl LLM {
         progress_to_stderr: bool,
         profile_texts: &[&str],
     ) -> (Vec<f32>, Vec<LogitProfile>) {
-        self.train_impl(data, epochs, lr, progress_to_stderr, Some(profile_texts))
+        self.train_impl(
+            data,
+            epochs,
+            lr,
+            progress_to_stderr,
+            Some(profile_texts),
+            None,
+        )
+    }
+
+    /// Train with an optional linear per-epoch LR decay from `lr` to
+    /// `final_lr` (the W8 lever). `None` keeps the constant-LR recipe
+    /// byte-identical: the schedule is computed per epoch and epoch 0
+    /// always trains at exactly `lr`.
+    pub fn train_with_schedule(
+        &mut self,
+        data: Vec<&str>,
+        epochs: usize,
+        lr: f32,
+        final_lr: Option<f32>,
+        progress_to_stderr: bool,
+        profile_texts: &[&str],
+    ) -> (Vec<f32>, Vec<LogitProfile>) {
+        self.train_impl(
+            data,
+            epochs,
+            lr,
+            progress_to_stderr,
+            Some(profile_texts),
+            final_lr,
+        )
     }
 
     fn train_impl(
@@ -451,6 +563,7 @@ impl LLM {
         lr: f32,
         progress_to_stderr: bool,
         profile_texts: Option<&[&str]>,
+        final_lr: Option<f32>,
     ) -> (Vec<f32>, Vec<LogitProfile>) {
         // Tokenize every example once, truncated to the sequence budget.
         let tokenized_data = data
@@ -466,6 +579,14 @@ impl LLM {
         let mut epoch_losses = Vec::with_capacity(epochs);
         let mut profile = Vec::with_capacity(epochs);
         for epoch in 0..epochs {
+            // The W8 schedule: linear per-epoch lerp from lr to final_lr;
+            // epoch 0 sits exactly on lr, None keeps lr constant.
+            let epoch_lr = match final_lr {
+                Some(target) if epochs > 1 => {
+                    lr + (target - lr) * (epoch as f32 / (epochs - 1) as f32)
+                }
+                _ => lr,
+            };
             let mut total_loss = 0.0;
             for training_row in &tokenized_data {
                 if training_row.len() < 2 {
@@ -491,7 +612,7 @@ impl LLM {
                 let mut grads_output = Self::compute_gradients_step(&probs, target_ids);
                 Self::clip_gradients(&mut grads_output, 5.0);
                 for layer in self.network.iter_mut().rev() {
-                    grads_output = layer.backward(&grads_output, lr);
+                    grads_output = layer.backward(&grads_output, epoch_lr);
                 }
             }
 
@@ -1101,6 +1222,66 @@ impl LLM {
             completion_sentences: (sentences_sum / batch) as f32,
             mean_completion_len: (length_sum / batch) as f32,
         }
+    }
+}
+
+impl DecodeKnobs {
+    /// Greedy defaults: T=1.0 keeps the pinned greedy stream, every other
+    /// knob off.
+    pub fn greedy() -> Self {
+        Self {
+            temperature: 1.0,
+            top_p: 0.0,
+            presence: 0.0,
+            repetition: 1.0,
+        }
+    }
+
+    /// True when nothing moved: the decode is exactly the pinned greedy
+    /// stream, so callers can keep the seed-free fast path.
+    pub fn is_greedy(&self) -> bool {
+        *self == Self::greedy()
+    }
+
+    /// Restore the greedy defaults.
+    pub fn reset(&mut self) {
+        *self = Self::greedy();
+    }
+
+    /// Set temperature (> 0); 1.0 restores the greedy pin.
+    pub fn set_temperature(&mut self, value: f32) -> Result<(), String> {
+        if value <= 0.0 {
+            return Err("temperature must be positive".to_string());
+        }
+        self.temperature = value;
+        Ok(())
+    }
+
+    /// Set the nucleus cutoff ((0, 1]); outside that interval turns it off.
+    pub fn set_top_p(&mut self, value: f32) -> Result<(), String> {
+        if value <= 0.0 || value > 1.0 {
+            return Err("top-p must be in (0, 1]".to_string());
+        }
+        self.top_p = value;
+        Ok(())
+    }
+
+    /// Set the flat per-seen-token penalty (>= 0).
+    pub fn set_presence(&mut self, value: f32) -> Result<(), String> {
+        if value < 0.0 {
+            return Err("presence must be non-negative".to_string());
+        }
+        self.presence = value;
+        Ok(())
+    }
+
+    /// Set the count-scaled penalty divisor (>= 1).
+    pub fn set_repetition(&mut self, value: f32) -> Result<(), String> {
+        if value < 1.0 {
+            return Err("repetition must be >= 1.0".to_string());
+        }
+        self.repetition = value;
+        Ok(())
     }
 }
 

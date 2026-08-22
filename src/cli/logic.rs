@@ -1,4 +1,4 @@
-use super::{Invocation, Mode};
+use super::{Invocation, Mode, exclusive_error, usage};
 
 const DEFAULT_SEED: u64 = 42;
 const DEFAULT_EPOCHS: usize = 100;
@@ -7,31 +7,10 @@ const DEFAULT_PRESENCE: f32 = 0.0;
 const DEFAULT_REPETITION: f32 = 1.0;
 const DEFAULT_TOP_P: f32 = 0.0;
 
-fn usage() {
-    // The one-line contract: flags first, then exactly one mode.
-    println!(
-        "Usage: llm [--seed <n>] [--model <path>] [--epochs <n>] [--tiny] [--trace] [--temperature <t>] [--fluency <n>] [--presence <c>] [--repetition <r>] [--top-p <p>] [--e2e <prompt> | --eval | --train <file.jsonl> | --probe | --models]"
-    );
-    println!();
-
-    // One working command per surface.
-    println!("Examples:");
-    println!("  llm");
-    println!("  llm --trace --seed 42");
-    println!("  llm --models");
-    println!("  llm --model models/watercycle-latest.bin");
-    println!("  llm --e2e \"hello world\"");
-    println!("  llm --eval --seed 42");
-    println!("  llm --model models/mine.bin --eval --seed 42");
-    println!(
-        "  llm --tiny --train models/tinystories/train.jsonl --epochs 2 --model models/ts.bin"
-    );
-    println!("  llm --tiny --eval --model models/ts.bin --fluency 20");
-    println!("  llm --tiny --eval --model models/ts.bin --temperature 0.7 --presence 1.5");
-    println!(
-        "  llm --tiny --eval --model models/ts.bin --temperature 0.7 --top-p 0.8 --presence 1.5"
-    );
-    println!("  llm --probe --model models/mine.bin --seed 42");
+/// The decode-knob surfaces: tiny-lane eval, the single-shot ask, and the
+/// interactive chat. Fluency stays a tiny-eval-only yardstick.
+fn is_decode_surface(tiny: bool, mode: &Mode) -> bool {
+    matches!(mode, Mode::Interactive | Mode::Ask { .. }) || (tiny && matches!(mode, Mode::Eval))
 }
 
 fn try_parse() -> Result<Invocation, String> {
@@ -50,6 +29,8 @@ fn try_parse() -> Result<Invocation, String> {
     let mut repetition = DEFAULT_REPETITION;
     let mut top_p = DEFAULT_TOP_P;
     let mut top_p_given = false;
+    let mut eos = false;
+    let mut lr_decay: Option<f32> = None;
 
     // Consume every argument in order.
     while index < args.len() {
@@ -69,7 +50,7 @@ fn try_parse() -> Result<Invocation, String> {
         // Dispatch the flag (or bare token) to its parse action.
         match argument {
             "--help" | "-h" => {
-                usage();
+                usage::print();
                 std::process::exit(0);
             }
             "--version" => {
@@ -105,6 +86,7 @@ fn try_parse() -> Result<Invocation, String> {
             }
             "--tiny" => tiny = true,
             "--trace" => trace = true,
+            "--eos" => eos = true,
             "--temperature" => {
                 let value = args
                     .get(index)
@@ -153,13 +135,19 @@ fn try_parse() -> Result<Invocation, String> {
                     .map_err(|_| format!("invalid top-p: {value}"))?;
                 top_p_given = true;
             }
+            "--lr-decay" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--lr-decay requires a value".to_string())?;
+                index += 1;
+                lr_decay = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("invalid lr-decay: {value}"))?,
+                );
+            }
             "--e2e" => {
-                if mode.is_some() {
-                    return Err(
-                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
-                            .to_string(),
-                    );
-                }
+                exclusive(&mut mode)?;
                 let prompt = args
                     .get(index)
                     .ok_or_else(|| "--e2e requires a prompt".to_string())?;
@@ -168,22 +156,22 @@ fn try_parse() -> Result<Invocation, String> {
                     prompt: prompt.clone(),
                 });
             }
+            "--ask" => {
+                exclusive(&mut mode)?;
+                let prompt = args
+                    .get(index)
+                    .ok_or_else(|| "--ask requires a prompt".to_string())?;
+                index += 1;
+                mode = Some(Mode::Ask {
+                    prompt: prompt.clone(),
+                });
+            }
             "--eval" => {
-                if mode.is_some() {
-                    return Err(
-                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
-                            .to_string(),
-                    );
-                }
+                exclusive(&mut mode)?;
                 mode = Some(Mode::Eval);
             }
             "--train" => {
-                if mode.is_some() {
-                    return Err(
-                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
-                            .to_string(),
-                    );
-                }
+                exclusive(&mut mode)?;
                 let path = args
                     .get(index)
                     .ok_or_else(|| "--train requires a file path".to_string())?;
@@ -191,35 +179,41 @@ fn try_parse() -> Result<Invocation, String> {
                 mode = Some(Mode::Train { path: path.clone() });
             }
             "--probe" => {
-                if mode.is_some() {
-                    return Err(
-                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
-                            .to_string(),
-                    );
-                }
+                exclusive(&mut mode)?;
                 mode = Some(Mode::Probe);
             }
             "--models" => {
-                if mode.is_some() {
-                    return Err(
-                        "--e2e, --eval, --train, --probe, and --models are mutually exclusive"
-                            .to_string(),
-                    );
-                }
+                exclusive(&mut mode)?;
                 mode = Some(Mode::Models);
+            }
+            "--demo" => {
+                exclusive(&mut mode)?;
+                mode = Some(Mode::Demo);
             }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
+
     // Resolve the mode default and the trace restriction.
     let mode = mode.unwrap_or(Mode::Interactive);
     if trace && !matches!(mode, Mode::Interactive) {
         return Err("--trace is only available in interactive mode".to_string());
     }
 
-    // The temperature knob belongs to the tiny-lane eval formula alone.
-    if temperature != DEFAULT_TEMPERATURE && !(tiny && matches!(mode, Mode::Eval)) {
-        return Err("--temperature requires --tiny --eval".to_string());
+    // The training-only levers: E11 termination and W8 LR decay.
+    if eos && !(tiny && matches!(mode, Mode::Train { .. })) {
+        return Err("--eos requires --tiny --train".to_string());
+    }
+    if lr_decay.is_some() && !(tiny && matches!(mode, Mode::Train { .. })) {
+        return Err("--lr-decay requires --tiny --train".to_string());
+    }
+    if lr_decay.is_some_and(|final_lr| final_lr <= 0.0) {
+        return Err("--lr-decay must be positive".to_string());
+    }
+
+    // The temperature knob belongs to every decode surface.
+    if temperature != DEFAULT_TEMPERATURE && !is_decode_surface(tiny, &mode) {
+        return Err("--temperature requires --tiny --eval, --ask, or interactive chat".to_string());
     }
     if temperature <= 0.0 {
         return Err("--temperature must be positive".to_string());
@@ -233,12 +227,14 @@ fn try_parse() -> Result<Invocation, String> {
         return Err("--fluency needs at least one sample".to_string());
     }
 
-    // The penalty and top-p knobs belong to the tiny-lane eval formula
-    // alone.
+    // The penalty and top-p knobs belong to every decode surface.
     if (presence != DEFAULT_PRESENCE || repetition != DEFAULT_REPETITION)
-        && !(tiny && matches!(mode, Mode::Eval))
+        && !is_decode_surface(tiny, &mode)
     {
-        return Err("--presence and --repetition require --tiny --eval".to_string());
+        return Err(
+            "--presence and --repetition require --tiny --eval, --ask, or interactive chat"
+                .to_string(),
+        );
     }
     if presence < 0.0 {
         return Err("--presence must be non-negative".to_string());
@@ -246,8 +242,8 @@ fn try_parse() -> Result<Invocation, String> {
     if repetition < 1.0 {
         return Err("--repetition must be >= 1.0".to_string());
     }
-    if top_p_given && !(tiny && matches!(mode, Mode::Eval)) {
-        return Err("--top-p requires --tiny --eval".to_string());
+    if top_p_given && !is_decode_surface(tiny, &mode) {
+        return Err("--top-p requires --tiny --eval, --ask, or interactive chat".to_string());
     }
     if top_p_given && (top_p <= 0.0 || top_p > 1.0) {
         return Err("--top-p must be in (0, 1]".to_string());
@@ -256,9 +252,13 @@ fn try_parse() -> Result<Invocation, String> {
     // Resolve the seed: machine modes default to 42, interactive draws
     // a random seed unless one was given.
     let seed = seed.unwrap_or(match mode {
-        Mode::Eval | Mode::E2e { .. } | Mode::Train { .. } | Mode::Probe | Mode::Models => {
-            DEFAULT_SEED
-        }
+        Mode::Eval
+        | Mode::E2e { .. }
+        | Mode::Ask { .. }
+        | Mode::Train { .. }
+        | Mode::Probe
+        | Mode::Models
+        | Mode::Demo => DEFAULT_SEED,
         Mode::Interactive => rand::random::<u64>(),
     });
 
@@ -275,7 +275,18 @@ fn try_parse() -> Result<Invocation, String> {
         presence,
         repetition,
         top_p,
+        eos,
+        lr_decay,
     })
+}
+
+/// Every mode flag fights every other: setting a second one is a usage
+/// error naming the whole family.
+fn exclusive(mode: &mut Option<Mode>) -> Result<(), String> {
+    if mode.is_some() {
+        return Err(exclusive_error());
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_invocation() -> Invocation {

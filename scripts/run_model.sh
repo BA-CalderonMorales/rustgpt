@@ -3,7 +3,7 @@
 #
 #   scripts/run_model.sh <model>
 #
-# <model> is a catalog id (ts-13m-s42, watercycle-latest, ...), a
+# <model> is a catalog id (stories-full, watercycle-latest, ...), a
 # checkpoint path (models/x.bin), or an external name (qwen). Catalog ids
 # and paths run the release binary, which owns the authoritative
 # "not found" story; external names run a local GGUF engine (ollama or

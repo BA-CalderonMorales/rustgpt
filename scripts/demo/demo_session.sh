@@ -50,7 +50,7 @@ sleep 4
 echo
 echo "=== 6. the laptop lane: 7.3M params trained on real story text ==="
 sleep 1
-./target/release/llm --tiny --train models/tinystories/demo.jsonl --epochs 1 --seed 42 --model models/tinystories/demo.bin 2>&1 | python3 -c "import sys,json; print(json.dumps(json.loads(sys.stdin.read().splitlines()[-1]), indent=2))" | head -60
+./target/release/llm --tiny --train models/tinystories/demo.jsonl --epochs 1 --seed 42 --model models/tinystories/stories-demo.bin 2>&1 | python3 -c "import sys,json; print(json.dumps(json.loads(sys.stdin.read().splitlines()[-1]), indent=2))" | head -60
 sleep 2
 
 echo
@@ -60,7 +60,7 @@ echo "    greedy decode is pinned at repetition 1.0 (the '.' frequency head);"
 echo "    the Qwen-honoring stack (T=0.7, top-p 0.8, presence 1.5, repetition 1.1)"
 echo "    lands the gate at 0.021 with repetition-free 0.65, distinct-1 0.70 --"
 echo "    a 14M from-scratch model, no retraining"
-./target/release/llm --tiny --eval --model models/tinystories/ts-13m-s42.bin --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1 --fluency 20 2>&1 | python3 scripts/demo/show_gate.py
+./target/release/llm --tiny --eval --model models/tinystories/stories-full.bin --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1 --fluency 20 2>&1 | python3 scripts/demo/show_gate.py
 sleep 3
 
 echo

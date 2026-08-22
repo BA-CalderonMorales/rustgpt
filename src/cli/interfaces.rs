@@ -1,10 +1,12 @@
 pub(crate) enum Mode {
     Interactive,
     E2e { prompt: String },
+    Ask { prompt: String },
     Eval,
     Train { path: String },
     Probe,
     Models,
+    Demo,
 }
 
 pub(crate) struct Invocation {
@@ -23,4 +25,10 @@ pub(crate) struct Invocation {
     pub repetition: f32,
     /// Nucleus (top-p) mass cutoff (0.0 = off), tiny-lane eval only.
     pub top_p: f32,
+    /// Append " </s>" to every --tiny --train row: the E11 termination
+    /// lever (default off = byte-identical rows).
+    pub eos: bool,
+    /// Linear per-epoch LR decay target for --tiny --train (None = constant
+    /// LR, the W8 control; default off = byte-identical).
+    pub lr_decay: Option<f32>,
 }

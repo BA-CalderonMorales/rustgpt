@@ -1,7 +1,7 @@
 [
     {
-        "id": "ts-13m-s42",
-        "path": "models/tinystories/ts-13m-s42.bin",
+        "id": "stories-full",
+        "path": "models/tinystories/stories-full.bin",
         "family": "tinystories",
         "parameters": 14230655,
         "seed": 42,
@@ -25,29 +25,36 @@
         "quality": ["full-corpus", "collapse-free-at-decode (0.0.7 recipe)"]
     },
     {
-        "id": "demo-slice",
-        "path": "models/tinystories/demo.bin",
+        "id": "stories-demo",
+        "path": "models/tinystories/stories-demo.bin",
         "family": "tinystories",
         "parameters": 7318114,
         "seed": 42,
         "recipe": {
             "data": "models/tinystories/demo.jsonl",
             "stories": 300,
-            "epochs": 1,
-            "lr": 0.0005
+            "epochs": 6,
+            "lr": 0.0005,
+            "eos": true,
+            "lr_final": 5e-05
         },
         "eval": {
-            "ce_p10": 5.42,
-            "ce_p50": 5.96,
-            "ce_p90": 6.44,
-            "coverage": 0.9058,
-            "greedy_gate": 1.0
+            "ce_p10": 5.6,
+            "ce_p50": 6.4,
+            "ce_p90": 7.06,
+            "coverage": 1.0,
+            "greedy_gate": 0.99
         },
         "decode": {
-            "gate_at_t12": null,
-            "repetition_free_qwen_stack": null
+            "gate_at_qwen_stack": 0.0833,
+            "mean_completion_len": 19.4,
+            "repetition_free_qwen_stack": 0.45
         },
-        "quality": ["laptop-lane-demo", "pristine-slice"]
+        "quality": [
+            "laptop-lane-demo",
+            "pristine-slice",
+            "termination-trained (E11+W8 combo, v0.0.8)"
+        ]
     },
     {
         "id": "watercycle-latest",

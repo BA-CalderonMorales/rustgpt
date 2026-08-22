@@ -174,6 +174,79 @@ small enough to explain, test, and reverse.
 
 ## Training and Data (the collapse probes)
 
+- **Termination supervision (`</s>` on every row), claim as predeclared
+  (2026-08-22, E11).** Finding being attacked: no `--tiny --train` row ever
+  ends in `</s>` (TinyStories rows are truncated mid-corpus), so p(`</s>`) is
+  only ever pushed DOWN through the softmax denominator -- the tiny lane
+  never learns to stop (mean completion length == 123 == token cap minus
+  prompt, every sample, every config). Claim: "`--tiny --train --eos`
+  (append ` </s>` to every training row) teaches termination -- a measurable
+  fraction of greedy completions end in `</s>` before the token cap,
+  mean_completion_len < 123 -- without materially hurting held-out CE
+  (p50 within +0.25 of the constant-LR control at matched epochs)." Recipe:
+  demo slice, seed 42, 6 epochs, LR 5e-4 constant, control = the W8
+  control run (same binary, same session); measured by `--tiny --eval
+  --fluency 20` on the trained artifact (mean_completion_len,
+  repetition-free rate) plus the train JSON's greedy samples. Falsified if
+  completions never shorten OR CE degrades beyond the margin. Mechanism:
+  the label `</s>` appears as a TARGET only if it ends rows; one-hot
+  targets otherwise make every story infinitely long, so termination is
+  unlearnable by construction.
+- **Controlled LR decay, verdict SPLIT (2026-08-22, W8, seed 42).**
+  Predeclared claim: "a linear LR decay (5e-4 -> 5e-5 over the run) keeps
+  the demo-slice run CE-stable and lowers greedy repetition vs constant
+  LR." Recipe: `--tiny --train models/tinystories/demo.jsonl --epochs 6
+  --seed 42 [--lr-decay 5e-5]`, fresh init both sides, same binary.
+  `--lr-decay <final_lr>` rides a per-epoch lerp; epoch 0 sits exactly on
+  5e-4, so off = byte-identical recipe. Table:
+
+  | run | loss first->last | CE p50 | greedy gate |
+  |-----|------------------|--------|-------------|
+  | constant LR (control) | 6.146 -> 5.231 (U-shape, min 5.218 @ e5) | 6.655 | 1.000 |
+  | decay -> 5e-5 | 6.146 -> 5.062 (monotone) | 6.473 | 0.979 |
+
+  Verdict: the STABILITY half LANDED -- decay's loss curve falls monotonically
+  while constant LR bends upward after its minimum (the same instability that
+  bit the 12-epoch run), and held-out CE improves by 0.18 instead of being
+  costed. The REPETITION half is FALSIFIED -- greedy gate 0.979 vs 1.000 is
+  nowhere near the 0.5 collapse line: the attractor lives in the weights'
+  argmax structure at this scale, not in LR noise. Meaning for the gap table:
+  LR decay buys training headroom (longer stable runs), which the
+  combination run below cashes in; it buys nothing at decode time.
+- **Termination supervision (`</s>` on every row), LANDED with a measured
+  overshoot (2026-08-22, E11, seed 42).** Predeclared claim above; recipe:
+  `--tiny --train models/tinystories/demo.jsonl --epochs 6 --seed 42 --eos`
+  (constant LR), control = the W8 control row. Table (greedy leg vs the
+  Qwen stack leg, both `--fluency 20` on the trained artifact):
+
+  | leg | gate | mean len | rep-free | distinct-1 | sents |
+  |-----|------|----------|----------|------------|-------|
+  | control artifact, greedy | 1.000 | 123.0 (cap) | 0.00 | 0.008 | - |
+  | eos artifact, greedy | 1.000 | 123.0 (cap) | 0.00 | 0.008 | - |
+  | control artifact, Qwen stack | 0.011 | 123.0 (cap) | 0.25 | 0.625 | 7.3 |
+  | eos artifact, Qwen stack | 0.000 | 3.0 | 0.75 | 0.735 | 0.6 |
+
+  Verdict: LANDED as claimed -- p(`</s>`) becomes a learned outcome for the
+  first time (sampled completions terminate at ~3 tokens instead of riding
+  the 123-token cap; every completion ends before the cap), and held-out CE
+  costs +0.14 (6.797 vs 6.655), inside the predeclared +0.25 margin. The
+  greedy leg STILL ignores `</s>` (gate 1.0): the frequency-head attractor
+  outvotes termination at T=1.0, confirming yet again that greedy collapse
+  is an argmax phenomenon no label signal fixes from below. The measured
+  side effect: termination OVERSHOOT -- 3-token stub answers under the
+  stack (sents 0.6). The combination run below shows decay moderates it.
+- **Combination (eos + decay), landed as the new demo recipe (2026-08-22,
+  seed 42).** `--tiny --train models/tinystories/demo.jsonl --epochs 6
+  --seed 42 --eos --lr-decay 5e-5` retrains stories-demo fresh (loss
+  6.124 -> 5.023, monotone; CE p10/p50/p90 = 5.60/6.40/7.06, coverage 1.0;
+  greedy gate 0.990). Under the Qwen stack: completions average 19.4 tokens
+  (termination present, overshoot moderated vs eos-only's 3.0),
+  repetition-free 0.45, distinct-1 0.823 -- the best CE of the four runs
+  with real termination. Catalog eval numbers refreshed. Attribution note:
+  the first combo attempt accidentally LOADED the existing stories-demo.bin
+  and continued-trained it (loss started at 5.50) -- re-run fresh for clean
+  attribution; continue-training is documented behavior of `--model` +
+  `--train`, not a bug.
 - **Label smoothing, PREDECLARED, not yet run (2026-08-16, W7).** The
   decode-side levers (W4 sampling, W5 penalties) already break the
   collapse gate deterministically, so this training-side lever is
@@ -184,13 +257,6 @@ small enough to explain, test, and reverse.
   demo slice, seed 42, epochs matched to the W2 6-epoch run, CE
   trajectories side-by-side; falsified if smoothing costs CE without
   touching the gate. Target-construction change in the loss path only.
-- **Controlled LR decay, PREDECLARED, not yet run (2026-08-16, W8).**
-  Claim intact: "a linear LR decay (5e-4 -> 5e-5 over the run) keeps the
-  demo-slice run CE-stable and lowers greedy repetition vs constant LR."
-  ORDER when run: demo slice first (~40s/epoch, the collapse reproduces
-  there identically), full 40k corpus only if the slice passes. Constant
-  LR destabilized at 12 epochs (loss 5.23 -> 5.37); the W4/W5 verdicts
-  mean a slice fail is a recorded falsification with no further spend.
 - **Top-p nucleus sampling, FALSIFIED on the W4 winner (2026-08-16, W6,
   seed 42).** Claim: "top-p truncation (p in {0.80, 0.90, 0.95}) combined
   with the W4 winner preserves fluency while trimming the low-mass tail

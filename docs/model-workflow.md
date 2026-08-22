@@ -12,7 +12,7 @@ cargo run --release -- --eval --seed 42 --model models/watercycle-latest.bin
 
 # The tiny lane: real-corpus stories at the laptop config.
 cargo run --release -- --tiny --train models/tinystories/train.jsonl \
-  --epochs 1 --seed 42 --model models/tinystories/ts-13m-s42.bin
+  --epochs 1 --seed 42 --model models/tinystories/stories-full.bin
 ```
 
 Training modes print exactly one JSON object to stdout: the trajectory
@@ -23,8 +23,8 @@ logit-regime profile, samples, and the collapse gate.
 
 ```bash
 cargo run --release -- --eval --seed 42                      # micro oracle: 4/4/1.0
-cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin
-cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin --fluency 20
+cargo run --release -- --tiny --eval --model models/tinystories/stories-full.bin
+cargo run --release -- --tiny --eval --model models/tinystories/stories-full.bin --fluency 20
 ```
 
 The eval JSON is the checkpoint's score sheet: held-out exact/prefix/
@@ -38,7 +38,7 @@ The 0.0.7 decode knobs -- sampling temperature, presence/repetition
 penalties, top-p -- are probed per config, seeded and reproducible:
 
 ```bash
-cargo run --release -- --tiny --eval --model models/tinystories/ts-13m-s42.bin \
+cargo run --release -- --tiny --eval --model models/tinystories/stories-full.bin \
   --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1 --fluency 20
 ```
 
@@ -57,7 +57,7 @@ JSON object.
 ## 5. Use
 
 ```bash
-cargo run --release -- --model models/tinystories/ts-13m-s42.bin   # chat, no retrain
+cargo run --release -- --model models/tinystories/stories-full.bin   # chat, no retrain
 cargo run --release -- --model models/watercycle-latest.bin --e2e "hello world"
 cargo run --release -- --model models/watercycle-latest.bin --trace  # step-by-step decode
 ```

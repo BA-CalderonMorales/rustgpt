@@ -9,9 +9,14 @@ fn main() {
 
     llm::set_seed(invocation.seed);
 
-    // The catalog probe is a pure read: no datasets, no model.
+    // The catalog probe and the guided demo are pure reads: no datasets,
+    // no water-cycle model build.
     if matches!(invocation.mode, cli::Mode::Models) {
         application::run_models();
+        return;
+    }
+    if matches!(invocation.mode, cli::Mode::Demo) {
+        application::run_demo();
         return;
     }
 
