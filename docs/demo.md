@@ -19,6 +19,31 @@ each step prepares the next:
  7  llm --eval --seed 42                 the micro arena oracle: fresh, seeded
 ```
 
+## Inside --demo
+
+The guided tour is the human-readable pipeline: seven numbered steps from
+raw text to a working model, each closing a `.......... DONE` bar and
+saying what just happened in plain language:
+
+```text
+1) Pulling the training dataset        path, story count, first excerpt
+2) Cleaning the text                   whole-word vocabulary, <unk> / </s>
+3) Configuration for pretraining       the settings table (see below)
+4) Building the model                  parameter count and arrangement
+5) Training                            the live loss bar, start -> end loss
+6) Scoring held-out stories            CE p50 (teacher-forced), collapse gate
+7) Using your model                    greedy vs tuned decode, chat handover
+```
+
+Step 3 is the configuration table: every applied value next to what it
+decides and where to tweak it (`src/configuration/constants.rs` for model
+shape, `--epochs` / `--lr-decay` / `--seed` flags on your own run, or the
+corpus itself for vocabulary). Values come from the same sources the run
+uses; the table never paraphrases a second truth.
+
+Nothing is saved by the tour: training happens in memory only, and the
+tour ends inside interactive chat on the freshly trained model.
+
 ## Regenerate the GIF
 
 Requires `vhs` (dev-only tool, never a cargo dependency):

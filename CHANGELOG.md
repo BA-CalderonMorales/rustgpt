@@ -5,6 +5,40 @@ produced: score, trajectory, and artifacts. The top section becomes the
 GitHub release body (see `.github/workflows/release.yml`), so the public
 record and the repo history are the same document.
 
+## [0.0.10] - 2026-08-22
+
+The demo, retold for humans: `--demo` is now a seven-step numbered
+pipeline walkthrough -- raw text in, working model out -- built to be
+followed, not just watched.
+
+Each step prints what it is doing, closes a dot-bar DONE marker in the
+trainer's visual grammar, then says what happened in plain language:
+(1) pull the dataset (path, story count, first excerpt); (2) clean the
+text into the whole-word vocabulary (<unk> stranger, </s> end); (3) the
+new configuration table -- every applied setting beside what it decides
+and where to tweak it (`src/configuration/constants.rs` for model shape,
+`--epochs` / `--lr-decay` / `--seed` flags on your own run, the corpus
+itself for vocabulary), with values read from the same sources the run
+uses; (4) build (parameter count and arrangement); (5) train on the live
+loss bar; (6) score held-out stories honestly; (7) decode greedy vs
+tuned side by side and hand over the keyboard inside interactive chat.
+
+Layout: the tour split at its natural seam into `application/demo.rs`
+(steps 1-5) and `application/demo_use.rs` (score, use, handover), with
+the table renderer in `application/settings_table.rs`; the stdout lane
+of `narrate.rs` swapped stage banners for numbered-step primitives while
+the stderr lane keeps serving `--tiny --train`. docs/demo.md documents
+the tour's shape ("Inside --demo"). Nothing is saved by the tour;
+training stays in memory.
+
+Seeded evidence (--demo --seed 42, release binary): 300 stories,
+1,379-word vocabulary, 7,318,883 parameters; loss fell 6.15 -> 5.39
+over 3 epochs at lr 5e-4; held-out CE p50 6.45 (teacher-forced);
+collapse gate 0.97 at greedy (measured, not hidden) while the tuned
+stack (T=0.7, top-p 0.80, presence 1.5, repetition 1.1) samples
+repetition-free. Gates: fmt, clippy -D warnings, 103 tests passed.
+GIF/PNG re-record deferred: the tape still closes pointing at the tour.
+
 ## [0.0.9] - 2026-08-22
 
 The guided-path patch: `--help` becomes the map, the demo walks it, and a

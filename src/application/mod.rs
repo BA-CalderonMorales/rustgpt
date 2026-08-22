@@ -1,9 +1,11 @@
 mod catalog;
 mod chat;
 mod demo;
+mod demo_use;
 mod logic;
 mod narrate;
 mod probe;
+mod settings_table;
 mod tiny;
 mod trace;
 mod train_lm;
@@ -13,11 +15,13 @@ mod train_lm;
 pub(crate) use catalog::{resolve_model_arg, run_models};
 pub(crate) use chat::{chat_loop, render_answer};
 pub(crate) use demo::run_demo;
+pub(crate) use demo_use::score_and_use;
 pub(crate) use logic::{
     build_llm, build_tiny_llm, load_datasets, run_headless, run_interactive, save_checkpoint,
     trace_turn,
 };
-pub(crate) use narrate::{note, note_stdout, stage, stage_stdout};
+pub(crate) use narrate::{done_stdout, note, note_stdout, stage, step_stdout};
 pub(crate) use probe::run_probe;
+pub(crate) use settings_table::print_pretraining;
 pub(crate) use tiny::{run_tiny_eval, tiny_eval, tiny_heldout_stories};
 pub(crate) use trace::Trace;
