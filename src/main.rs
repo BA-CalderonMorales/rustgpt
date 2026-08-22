@@ -5,7 +5,12 @@ fn main() {
     // The CLI owns every argument: mode, seed, model path, epochs, and the
     // trace flag. Machine modes default to seed 42; a bare interactive run
     // draws a random seed (pass --seed 42 for a reproducible session).
-    let invocation = cli::parse_invocation();
+    let mut invocation = cli::parse_invocation();
+
+    // A catalog id becomes its artifact path exactly once, here: loads,
+    // interactive's loaded-model check, and save targets all share one
+    // real path from this point on.
+    application::resolve_model_arg(&mut invocation.model);
 
     llm::set_seed(invocation.seed);
 

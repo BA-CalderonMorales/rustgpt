@@ -5,6 +5,55 @@ produced: score, trajectory, and artifacts. The top section becomes the
 GitHub release body (see `.github/workflows/release.yml`), so the public
 record and the repo history are the same document.
 
+## [0.0.9] - 2026-08-22
+
+The guided-path patch: `--help` becomes the map, the demo walks it, and a
+state-mutation bug in the flagship use surface is fixed.
+
+Help as the operating path (the temperwright pattern): `--help` now opens
+with seven numbered steps -- models, ask, chat, demo, train your own,
+score, oracle -- each with a one-line utility statement, then the decode
+knobs / training levers / reproducibility flags grouped in plain language,
+then one working example per step. The contract pin moved with it in the
+same change.
+
+The demo rebuilt around that path, non-destructive by contract. The old
+tape silently corrupted what it showcased: its training step pointed at
+the cataloged stories-demo artifact (continue-training it with a
+different recipe) and its eval step re-trained and re-saved the flagship.
+The new tape obeys three written rules (docs/demo.md): cataloged
+artifacts are only ever LOADED; training writes to a scratch artifact
+(models/tinystories/showcase.bin) behind an explicit rm -f; machine JSON
+passes through verdict formatters (scripts/demo/show_eval.py,
+show_gate.py) so viewers read meaning, not dumps. The session opens on
+`--help`, walks all seven steps including train-your-own on a tracked
+12-story fixture (scripts/demo/my-first-corpus.jsonl), and closes on the
+map. Competing homes deleted: scripts/demo/demo.tape (stale v0.0.5) and
+demo_session.sh (v0.0.7); tui.tape is the one home the makefile records.
+GIF and PNG re-recorded against this release binary.
+
+Bug fix: `llm --model <catalog-id>` no longer mutates state. The old
+code resolved a catalog id for loading but let interactive mode re-check
+the RAW argument for existence; missing as a file, the id fell into the
+first-run branch -- double-training the already-loaded model for 200
+epochs and writing a stray artifact named after the id into the working
+directory. Reproduced before the fix (stray file + md5 mismatch vs the
+catalog artifact), pinned after: chat_with_a_catalog_id_loads_it_and_
+never_creates_files asserts the LOADED MODEL branch fires, the training
+branch does not, and the working directory gains nothing. Resolution now
+happens exactly once at the parse boundary (application::
+resolve_model_arg), so loads, interactive's loaded-model check, and save
+targets share one real path.
+
+Home page slimmed 189 -> 75 lines: the operating path quick start, two
+sentences of honesty, the docs table. The artifact inventory moved to
+docs/model-workflow.md; the command reference lives where it belongs --
+in `--help` and docs/running-and-development.md.
+
+Gates green: fmt, clippy -D warnings, 103 tests passed (one new
+regression pin). Micro lane 4/4/1.0 unchanged; every number in the 0.0.8
+gap table stands.
+
 ## [0.0.8] - 2026-08-22
 
 The use-surface release, aimed at Qwen3-0.6B. The 0.0.7 decode win was

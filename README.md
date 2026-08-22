@@ -4,170 +4,59 @@
 
 **A from-scratch transformer language model in pure Rust — inspectable mechanics, no external ML framework (fork - see [Attribution](https://github.com/BA-CalderonMorales/rustgpt#attribution))**
 
-[![Crate](https://img.shields.io/badge/version-0.0.8-blue.svg?logo=rust&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt)
+[![Crate](https://img.shields.io/badge/version-0.0.9-blue.svg?logo=rust&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 [![Check](https://img.shields.io/github/actions/workflow/status/BA-CalderonMorales/rustgpt/check.yml?label=check&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/actions/workflows/check.yml)
 [![Test](https://img.shields.io/github/actions/workflow/status/BA-CalderonMorales/rustgpt/test.yml?label=test&style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/actions/workflows/test.yml)
 [![Docs](https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square)](https://github.com/BA-CalderonMorales/rustgpt/blob/main/docs/architecture.md)
 
-<img src="docs/demo-tui.gif" alt="rustgpt demo: contract probe, micro-arena eval, and the laptop lane training on real stories" width="100%">
+<img src="docs/demo-tui.gif" alt="rustgpt demo: the operating path from --help to a model you trained yourself" width="100%">
 
 </div>
 
-A from‑scratch transformer language model in pure Rust, implemented with
-`ndarray` tensors and no external ML framework. The intent is educational:
-to give an inspectable mental map of how a transformer works, not to produce
-a competitive model. Every layer is designed to be read, traced, and tested.
-The project benefits from an agent harness for exploration and editing
-tasks.
+A transformer language model written from scratch with `ndarray` tensors —
+built to be read, traced, and tested, not to compete. Every layer, the
+tokenizer, the optimizer, and the CLI are hand-rolled and documented in the
+docs below. Generated text is an honest measurement of small-model mechanics,
+never a quality benchmark.
 
-## Quick Start
+## Start here
 
-Build the release binary (or use the makefile surface: `make build`,
-`make verify`, `make eval`, `make demo`), then see what models exist and
-talk to one:
+Build, then walk the operating path top to bottom — the same map
+`target/release/llm --help` prints:
 
 ```bash
 git clone https://github.com/BA-CalderonMorales/rustgpt.git
 cd rustgpt
 cargo build --release
 
-target/release/llm --models                                   # the model catalog: path, recipe, seed, eval
-target/release/llm --eval --seed 42                           # train + held-out score (exact 4/4, mean 1.0)
-target/release/llm --model models/watercycle-latest.bin       # chat with a trained artifact (no retrain)
-target/release/llm --model stories-full --ask "Once upon a time,"   # single-shot ask (one JSON object)
-target/release/llm --model stories-full --ask "Once upon a time," \
-  --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1     # the Qwen-stack decode recipe
-target/release/llm --tiny --eval --model models/tinystories/stories-full.bin --fluency 20   # tiny-lane yardstick
-target/release/llm --demo --seed 42                           # guided novice tour: data -> model -> training -> eval -> use
+target/release/llm --models                                  # 1. pick an artifact from the catalog
+target/release/llm --model stories-full --ask "Once upon a time,"  # 2. one answer (greedy)
+target/release/llm --model watercycle-latest                 # 3. chat (/help inside)
+target/release/llm --demo --seed 42                          # 4. watch raw text become a model
+target/release/llm --tiny --train my-corpus.jsonl \
+  --epochs 6 --eos --lr-decay 5e-5 --seed 42 \
+  --model models/ts.bin                                      # 5. teach your own model
+target/release/llm --tiny --eval --model models/ts.bin --fluency 20  # 6. score it honestly
+target/release/llm --eval --seed 42                          # 7. the micro arena oracle: 4/4 exact
 ```
 
-`models/watercycle-latest.bin` is created by the eval command above (a
-missing `--model` path is a first-run save target for training modes).
-A loaded checkpoint is a use surface: `--model <path>` chats directly
-against the artifact with no training and no re-save; `--models` lists
-every artifact's recipe, seed, eval numbers, and quality labels.
-Running `target/release/llm` with no arguments enters interactive mode:
-it initializes a fresh random-seed model, prints the untrained model's
-noise, trains both phases (100 pretrain + 100 tuning epochs, live loss
-bar), and then chats until `exit`. Use `--seed 42` there too for a
-reproducible session.
-
-The 0.0.7 headline: the tiny-lane collapse gate is defeated at decode
-time, no retraining. Greedy decode from "Once upon a time," is pinned at
-repetition rate 1.0 (a frequency-head attractor); the Qwen-honoring
-decode stack (temperature 0.7, top-p 0.80, presence 1.5, repetition 1.1)
-lands the gate at 0.021 with 65% of completions fully repetition-free,
-distinct-1 0.70, and ~7 sentences per completion -- a 14M-param
-from-scratch model. Because this is a small educational model, generated
-text is an observation of the mechanics -- measured, seeded, and pinned by
-the contract tests, not a quality benchmark.
-
-The 0.0.8 move makes that stack reachable by humans: the decode knobs left
-the eval-only ghetto (`--ask`, interactive chat with slash commands), the
-model learned to stop (`--eos` termination supervision), training got its
-schedule (`--lr-decay`), and `--demo` narrates the whole pipeline for a
-curious beginner. The us-vs-Qwen3-0.6B gap table ships in the changelog:
-decode-layer near-parity, weights-layer chasm -- measured, not promised.
-
-## Artifacts
-
-Every `models/*.bin` is regenerable evidence, gitignored: its recipe, its
-seed, and its eval JSON reproduce the same artifact. Treat the table as an
-inventory of the exploration so far, not a product catalog.
-
-| Artifact | Size | Recipe / experiment | What it demonstrates | Regenerate |
-|---|---|---|---|---|
-| `watercycle-latest.bin` | 1.5 MB | v0.0.5 eval recipe (seed 42, replay + min-CE promotion), E10 lineage | The release winner: greets and hedges; held-out 4/4 exact, mean 1.0 | `rm models/watercycle-latest.bin && target/release/llm --eval --seed 42 --model models/watercycle-latest.bin` |
-| `watercycle-e10.bin` | 1.5 MB | E10 social-register era | Social register landed: "hi!" -> "Assistant : Hello !" | same recipe as latest (superseded by it) |
-| `watercycle-e8.bin` | 1.5 MB | E8 hedge-stabilization era | Stable hedging across probe prompts | same-era recipe (superseded) |
-| `watercycle-e7.bin` | 1.5 MB | E7 hedge era | "How do mountains form?" -> full hedge; OOV prompts never confidently hallucinate | same-era recipe (superseded) |
-| `watercycle-e6.bin` | 1.5 MB | E6 targeted paraphrase expansion | Chain statements and paraphrase pairs: exact 2/4, mean 0.6534 era | same-era recipe (superseded) |
-| `watercycle-e2.bin`, `watercycle-e1.bin` | 1.5 MB | Early recipe era | Water-cycle Q/A recital; no social register yet | same-era recipe (superseded) |
-| `watercycle-0.0.3.bin` | 1.5 MB | v0.0.3 era, checkpoint format v1 | Legacy: no longer loads in the current CLI ("not a rustgpt checkpoint"); kept for format archaeology | not regenerable in this format |
-| `tinystories/stories-full.bin` | 57 MB | 1 epoch over 40k TinyStories stories (seed 42, 1.5M tokens) | The laptop lane at full-corpus scale; greedy decode collapses (gate 1.0), the 0.0.7 decode stack defeats it (gate 0.021, repetition-free 0.65) | `python scripts/slice_tinystories.py && target/release/llm --tiny --train models/tinystories/train.jsonl --epochs 1 --seed 42 --model models/tinystories/stories-full.bin` (~1.5 h on a 14-thread laptop) |
-| `tinystories/stories-demo.bin` | 29 MB | 6 epochs over the 300-story demo slice, seed 42, `--eos --lr-decay 5e-5` (v0.0.8 recipe) | The demo lane: termination-trained (completions end before the cap under sampling), monotone loss, best CE of the four E11/W8 runs (p50 6.40) -- also the artifact `--demo` trains from scratch in miniature | `target/release/llm --tiny --train models/tinystories/demo.jsonl --epochs 6 --seed 42 --eos --lr-decay 5e-5 --model models/tinystories/stories-demo.bin` (~2 min) |
-
-`models/tinystories/train.jsonl` (40k stories) and
-`models/tinystories/heldout.jsonl` (256, split seed 20260816) are rebuilt
-by `scripts/slice_tinystories.py`; the held-out slice never touches a
-training slice.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `target/release/llm` | Interactive: train from a fresh random seed, then chat until `exit` |
-| `target/release/llm --models` | The model catalog: every trained artifact's path, recipe, seed, eval, and quality as one JSON object (human table on stderr) |
-| `target/release/llm --model <path>` | Load a trained checkpoint and chat with it -- no training, no re-save (the use surface) |
-| `target/release/llm --model <path> --ask "Once upon a time,"` | Single-shot raw continuation against a loaded artifact; one JSON object with a `decode` block; knobs honored (`--temperature 0.7 --top-p 0.8 ...`) |
-| `target/release/llm --demo --seed 42` | The guided six-stage pipeline tour on the fast slice: data -> vocabulary -> model -> training -> evaluation -> use (side-by-side greedy vs tuned), then chat |
-| `target/release/llm --e2e "..."` | Contract probe: generate once from a fresh model, print one JSON object (`status`, `output`, `total_parameters`) |
-| `target/release/llm --eval --seed 42` | Train both phases, score the four held-out prompts, print the truth table (items, summary, CE trajectory) |
-| `target/release/llm --model <path> --eval --seed 42` | First-run saves the trained checkpoint; re-runs load it, continue training, re-save |
-| `target/release/llm --model <path> --e2e "..."` | Probe a trained artifact (unknown words answer `I do not know that word`) |
-| `target/release/llm --probe --model <path> --seed 42` | Decode-time compute truth table: seeded top-k best-of-N vs greedy |
-| `target/release/llm --tiny --eval --model models/tinystories/stories-full.bin` | Laptop lane score formula: held-out CE percentiles, coverage, collapse gate |
-| `target/release/llm --tiny --eval --model models/tinystories/stories-full.bin --fluency 20` | Decode-quality yardstick: distinct-1/2, repetition-free rate, completion probe |
-| `target/release/llm --tiny --eval --model <path> --temperature 0.7 --top-p 0.8 --presence 1.5 --repetition 1.1` | The 0.0.7 decode stack: sampled gate and yardstick at a config (greedy leg pinned at T=1.0) |
-| `target/release/llm --tiny --train <file.jsonl> --epochs 1 --model <out.bin>` | Train the 14M-param laptop lane on a JSONL corpus, print trajectory + per-epoch logit profile + samples + eval (narrated stages on stderr) |
-| `target/release/llm --tiny --train models/tinystories/demo.jsonl --epochs 6 --eos --lr-decay 5e-5 --seed 42 --model models/tinystories/stories-demo.bin` | The v0.0.8 recipe: termination supervision (`--eos`) + linear LR decay; the combination that retrained stories-demo |
-| `cargo test --test output_properties_test -- --nocapture` | Property suite pass table against `models/watercycle-latest.bin` |
-| `cargo test --test conversation_suite_test -- --nocapture` | Conversation-surface suite (greetings, OOV, junk probes) |
-| `cargo +nightly fmt --check` / `cargo clippy --workspace --all-features --all-targets -- -D warnings` | Verify gates |
-| `cargo test --all-targets` | Unit, property/invariant, integration, and contract tests |
-| `cargo build --release` | Release binary (also produced by the release workflow) |
-| `make verify` / `make build` / `make demo` | Quality-of-life surface: gates, release build, demo gif re-record |
-
-E2E JSON contract:
-
-```json
-{"output":"...","prompt":"hello world","status":"ok","total_parameters":385776}
-```
-
-## Layout
-
-Each domain keeps a facade (`mod.rs`), its types and traits (`interfaces.rs`),
-and its implementation (`logic.rs`) — one pattern to learn, then every module
-reads the same way.
-
-```text
-src/
-├── main.rs               Parse, load, build, and run
-├── lib.rs                Domain declarations and compatibility re-exports
-├── cli/                   CLI mode and argument behavior
-├── application/           Dataset, model, training, and interaction orchestration
-├── configuration/         Shared model constants
-├── llm/                   Model API, composition, training, and generation
-├── transformer/           Transformer block composition
-├── self_attention/        Self-attention operation and private gradient test
-├── feed_forward/          Position-wise feed-forward operation and optimizers
-├── embeddings/            Token and positional embeddings
-├── output_projection/     Vocabulary projection
-├── layer_norm/            Layer normalization
-├── vocab/                 Vocabulary and tokenization
-├── dataset_loader/        JSON and CSV dataset loading
-└── adam/                  Adam optimizer
-tests/                     Integration, contract, and public-API checks
-data/                      The compact water-cycle micro-domain
-```
-
-Correctness is separated by layer: unit tests validate operations,
-mutation-resistant tests check optimizer invariants, integration tests
-exercise layers together, and the companion
-[rustgpt-evals](https://github.com/BA-CalderonMorales/rustgpt-evals) project
-observes the compiled CLI as a black box.
+Every step is seeded and reproducible; every score is measured against
+held-out data the model never saw. What the numbers currently say —
+including the us-vs-Qwen3-0.6B gap table — lives in the
+[CHANGELOG](CHANGELOG.md).
 
 ## Docs
 
 | Document | What |
 |---|---|
+| [Running and development](docs/running-and-development.md) | Every surface in detail: flags, knobs, checkpoints, exit codes |
+| [Demo](docs/demo.md) | How the GIF is recorded and its non-destructive rules |
 | [Architecture](docs/architecture.md) | Model pipeline, source map, reading order |
+| [Model workflow](docs/model-workflow.md) | Create, score, record, use — and the artifact inventory |
 | [Model and training](docs/model-and-training.md) | Current configuration and training phases |
-| [Dataset curation](docs/dataset-curation.md) | Water-cycle micro-domain, budgets, held-out prompts |
+| [Dataset curation](docs/dataset-curation.md) | The data: budgets, licenses, held-out scoring |
 | [Testing](docs/testing.md) | What each correctness boundary establishes |
-| [Running and development](docs/running-and-development.md) | CLI surface and local commands |
-| [Model workflow](docs/model-workflow.md) | From data to trained artifact to catalog to use |
 | [Learning directions](docs/learning-directions.md) | The experiment backlog — no product promises |
 
 ## License

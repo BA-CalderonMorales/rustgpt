@@ -70,3 +70,26 @@ stays the artifact.
 The release cadence: bump `version` in `Cargo.toml`, push to `main` (the
 release workflow tags and publishes), and the CHANGELOG top section is the
 release body with measured evidence and artifact pointers.
+
+## The Artifact Inventory
+
+Every `models/*.bin` is regenerable evidence, gitignored: its recipe, its
+seed, and its eval JSON reproduce the same artifact. Treat the table as an
+inventory of the exploration so far, not a product catalog.
+
+| Artifact | Size | Recipe / experiment | What it demonstrates | Regenerate |
+|---|---|---|---|---|
+| `watercycle-latest.bin` | 1.5 MB | v0.0.5 eval recipe (seed 42, replay + min-CE promotion), E10 lineage | The release winner: greets and hedges; held-out 4/4 exact, mean 1.0 | `rm models/watercycle-latest.bin && target/release/llm --eval --seed 42 --model models/watercycle-latest.bin` |
+| `watercycle-e10.bin` | 1.5 MB | E10 social-register era | Social register landed: "hi!" -> "Assistant : Hello !" | same recipe as latest (superseded by it) |
+| `watercycle-e8.bin` | 1.5 MB | E8 hedge-stabilization era | Stable hedging across probe prompts | same-era recipe (superseded) |
+| `watercycle-e7.bin` | 1.5 MB | E7 hedge era | "How do mountains form?" -> full hedge; OOV prompts never confidently hallucinate | same-era recipe (superseded) |
+| `watercycle-e6.bin` | 1.5 MB | E6 targeted paraphrase expansion | Chain statements and paraphrase pairs: exact 2/4, mean 0.6534 era | same-era recipe (superseded) |
+| `watercycle-e2.bin`, `watercycle-e1.bin` | 1.5 MB | Early recipe era | Water-cycle Q/A recital; no social register yet | same-era recipe (superseded) |
+| `watercycle-0.0.3.bin` | 1.5 MB | v0.0.3 era, checkpoint format v1 | Legacy: no longer loads in the current CLI ("not a rustgpt checkpoint"); kept for format archaeology | not regenerable in this format |
+| `tinystories/stories-full.bin` | 57 MB | 1 epoch over 40k TinyStories stories (seed 42, 1.5M tokens) | The laptop lane at full-corpus scale; greedy decode collapses (gate 1.0), the 0.0.7 decode stack defeats it (gate 0.021, repetition-free 0.65) | `python scripts/slice_tinystories.py && target/release/llm --tiny --train models/tinystories/train.jsonl --epochs 1 --seed 42 --model models/tinystories/stories-full.bin` (~1.5 h on a 14-thread laptop) |
+| `tinystories/stories-demo.bin` | 29 MB | 6 epochs over the 300-story demo slice, seed 42, `--eos --lr-decay 5e-5` (v0.0.8 recipe) | The demo lane: termination-trained (completions end before the cap under sampling), monotone loss, best CE of the four E11/W8 runs (p50 6.40) -- also the artifact `--demo` trains from scratch in miniature | `target/release/llm --tiny --train models/tinystories/demo.jsonl --epochs 6 --seed 42 --eos --lr-decay 5e-5 --model models/tinystories/stories-demo.bin` (~2 min) |
+
+`models/tinystories/train.jsonl` (40k stories) and
+`models/tinystories/heldout.jsonl` (256, split seed 20260816) are rebuilt
+by `scripts/slice_tinystories.py`; the held-out slice never touches a
+training slice.

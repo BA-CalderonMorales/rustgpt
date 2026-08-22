@@ -68,6 +68,25 @@ pub(crate) fn resolve_model_path(id: &str) -> Option<String> {
         .and_then(|entry| entry["path"].as_str().map(String::from))
 }
 
+/// Resolve the `--model` argument exactly once, at the parse boundary: a
+/// simple name that is neither an existing file nor a path is a catalog id
+/// and becomes its artifact path; anything else passes through unchanged.
+/// Every later consumer -- loads, interactive's loaded-model check, save
+/// targets -- then sees the same real path (the regression this pins: the
+/// old code resolved for loading but let interactive re-check the raw id,
+/// which fell into the training branch and wrote a stray artifact).
+pub(crate) fn resolve_model_arg(model: &mut Option<String>) {
+    if let Some(arg) = model {
+        let looks_like_path = arg.contains('/') || arg.contains('\\');
+        if !looks_like_path
+            && !std::path::Path::new(arg).exists()
+            && let Some(path) = resolve_model_path(arg)
+        {
+            *model = Some(path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::resolve_model_path;

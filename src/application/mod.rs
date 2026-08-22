@@ -10,7 +10,7 @@ mod train_lm;
 
 // The facade: every cross-file caller resolves these names here, never
 // through another file's internals.
-pub(crate) use catalog::{resolve_model_path, run_models};
+pub(crate) use catalog::{resolve_model_arg, run_models};
 pub(crate) use chat::{chat_loop, render_answer};
 pub(crate) use demo::run_demo;
 pub(crate) use logic::{

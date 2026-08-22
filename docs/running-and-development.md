@@ -4,6 +4,25 @@
 
 Install a current stable Rust toolchain with Cargo.
 
+## The Operating Path
+
+`llm --help` prints the map: start at the top, move down; each step
+prepares the next. The same path, with the sections of this document that
+cover each step:
+
+```text
+ 1  llm --models                         the catalog (see below)
+ 2  llm --model <id> --ask "<prompt>"    single-shot ask (see Single-Shot Ask)
+ 3  llm --model <id>                     interactive chat (see Interactive Mode)
+ 4  llm --demo                           the guided tour (see Guided Demo)
+ 5  llm --tiny --train <corpus.jsonl>    teach your own (see Training Levers)
+ 6  llm --tiny --eval --model <path>     held-out scoring (see Tiny-Lane Evaluation)
+ 7  llm --eval --seed 42                 the micro arena oracle (see Evaluation Mode)
+```
+
+The showcase in `docs/demo-tui.gif` walks exactly this path; its
+non-destructive rules live in docs/demo.md.
+
 ## Interactive Mode
 
 ```bash
