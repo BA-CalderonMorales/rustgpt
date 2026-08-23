@@ -9,14 +9,13 @@ use super::{Trace, trace_turn};
 /// knobbed turns sample through the full stack; the default path keeps the
 /// untraced greedy `predict` surface untouched.
 pub(crate) fn chat_loop(llm: &mut LLM, trace: &Trace, knobs: &mut DecodeKnobs) {
-    println!("\n--- Interactive Mode ---");
-    println!("Type a prompt and press Enter to generate text.");
-    println!("Type 'exit' to quit, or /help for commands.");
+    println!("\nInteractive mode");
+    println!("  type a prompt and press Enter; 'exit' quits; '/help' lists commands");
     let mut input = String::new();
     loop {
         // Read the next prompt.
         input.clear();
-        print!("\nEnter prompt: ");
+        print!("\nyou> ");
         std::io::stdout().flush().unwrap();
 
         // End of input (closed pipe) ends the session cleanly instead of
@@ -63,7 +62,7 @@ pub(crate) fn chat_loop(llm: &mut LLM, trace: &Trace, knobs: &mut DecodeKnobs) {
         } else {
             llm.predict(&formatted_input)
         };
-        println!("Model output: {}", render_answer(&prediction));
+        println!("model> {}\n", render_answer(&prediction));
     }
 }
 
@@ -125,7 +124,7 @@ fn set_knob(name: &str, value: Option<&str>, knobs: &mut DecodeKnobs) {
 }
 
 fn print_help() {
-    println!("Commands:");
+    println!("Commands (anything else is sent to the model):");
     println!(
         "  /temp <t>        sampling temperature (> 0; 1.0 = unscaled -- greedy while no other knob moves)"
     );
@@ -135,17 +134,28 @@ fn print_help() {
     println!("  /config          show the current decode knobs");
     println!("  /reset           restore greedy defaults");
     println!("  /exit            quit the session");
-    println!("Anything else is sent to the model.");
 }
 
 fn print_config(knobs: &DecodeKnobs) {
+    // One knob per line: the mode verdict first, then every value with its
+    // neutral reading (off reads as 'off', not as a number that means off).
     let mode = if knobs.is_greedy() {
         "greedy"
     } else {
         "sampling"
     };
-    println!(
-        "config: {mode} | temperature {} | top-p {} | presence {} | repetition {}",
-        knobs.temperature, knobs.top_p, knobs.presence, knobs.repetition
-    );
+    println!("config ({mode})");
+    println!("  temperature  {}", knobs.temperature);
+    println!("  top-p        {}", neutral_off(knobs.top_p, 0.0));
+    println!("  presence     {}", neutral_off(knobs.presence, 0.0));
+    println!("  repetition   {}", neutral_off(knobs.repetition, 1.0));
+}
+
+/// A knob's display value: the neutral setting reads as 'off'.
+fn neutral_off(value: f32, neutral: f32) -> String {
+    if value == neutral {
+        "off".to_string()
+    } else {
+        format!("{value}")
+    }
 }

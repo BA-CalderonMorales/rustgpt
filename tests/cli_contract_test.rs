@@ -285,9 +285,10 @@ fn models_emits_one_json_object_with_the_catalog() {
 
     // stderr carries the human-readable table.
     assert!(
-        stderr(&output).contains("ID          Family      Parameters"),
+        stderr(&output).contains("Trained models --"),
         "the human table belongs on stderr"
     );
+    assert!(stderr(&output).contains("PARAMS"), "column headers present");
 }
 
 #[test]
@@ -817,7 +818,10 @@ fn chat_slash_commands_mutate_only_valid_knobs() {
     let out = String::from_utf8(output.stdout.clone()).unwrap();
 
     // /help lists the commands.
-    assert!(out.contains("Commands:"), "/help must list commands");
+    assert!(
+        out.contains("Commands (anything else is sent to the model):"),
+        "/help must list commands"
+    );
     assert!(out.contains("/top-p <p>"));
 
     // A bad value is rejected and leaves the config unchanged.
@@ -829,11 +833,11 @@ fn chat_slash_commands_mutate_only_valid_knobs() {
 
     // Greedy default; sampling after a valid set and in every later
     // /config until reset; greedy again after reset.
-    assert_eq!(out.matches("config: greedy").count(), 4);
-    assert_eq!(out.matches("config: sampling").count(), 2);
+    assert_eq!(out.matches("config (greedy)").count(), 4);
+    assert_eq!(out.matches("config (sampling)").count(), 2);
 
     // The literal end marker never leaks into a rendered answer.
-    for line in out.lines().filter(|l| l.starts_with("Model output:")) {
+    for line in out.lines().filter(|l| l.starts_with("model>")) {
         assert!(!line.contains("</s>"), "marker must render clean: {line}");
     }
 
@@ -846,7 +850,7 @@ fn chat_session_ends_cleanly_at_end_of_input() {
     let output = run_with_stdin(&["--model", &path], b"What is rain?\n");
     assert_eq!(output.status.code(), Some(0));
     let out = stdout(&output);
-    assert!(out.contains("Model output:"), "the prompt must be answered");
+    assert!(out.contains("model>"), "the prompt must be answered");
     assert_eq!(
         out.matches("Exiting interactive mode.").count(),
         1,
@@ -900,11 +904,11 @@ fn chat_with_a_catalog_id_loads_it_and_never_creates_files() {
     assert_eq!(output.status.code(), Some(0));
     let out = stdout(&output);
     assert!(
-        out.contains("LOADED MODEL"),
+        out.contains("Loaded checkpoint"),
         "a catalog id must load its artifact: {out}"
     );
     assert!(
-        !out.contains("BEFORE TRAINING"),
+        !out.contains("Before training"),
         "loading must not fall into the training branch: {out}"
     );
     assert!(

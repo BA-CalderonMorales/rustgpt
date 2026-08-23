@@ -6,7 +6,7 @@ use llm::{
     transformer::TransformerBlock,
 };
 
-use super::{Trace, chat, train_lm};
+use super::{Trace, chat, thousands, train_lm};
 use crate::cli::{Invocation, Mode};
 
 const PRETRAINING_EPOCHS: usize = 100;
@@ -504,23 +504,26 @@ fn run_training_and_interactive(
     trace_startup(dataset, llm, model_path, trace);
 
     // Model information.
-    println!("\n=== MODEL INFORMATION ===");
-    println!("Network architecture: {}", llm.network_description());
+    println!("\nModel");
+    println!("  network      {}", llm.network_description());
     println!(
-        "Model configuration -> max_seq_len: {}, embedding_dim: {}, hidden_dim: {}",
-        MAX_SEQ_LEN, EMBEDDING_DIM, HIDDEN_DIM
+        "  dimensions   embedding {} | hidden {} | sequence {}",
+        EMBEDDING_DIM, HIDDEN_DIM, MAX_SEQ_LEN
     );
-    println!("Total parameters: {}", llm.total_parameters());
     println!(
-        "Seed: {} (pass --seed <n> to reproduce a session)",
+        "  parameters   {}",
+        thousands(llm.total_parameters() as u64)
+    );
+    println!(
+        "  seed         {} (--seed <n> reproduces this session)",
         llm::seed()
     );
 
     // A loaded checkpoint is the use surface: chat directly against the
     // artifact, no training, no re-save (the artifact stays the artifact).
     if let Some(path) = model_path.filter(|path| std::path::Path::new(path).exists()) {
-        println!("\n=== LOADED MODEL (no training, no re-save) ===");
-        println!("Checkpoint: {path}");
+        println!("\nLoaded checkpoint (no training, no re-save)");
+        println!("  artifact     {path}");
         chat::chat_loop(llm, trace, knobs);
         return;
     }
@@ -529,14 +532,14 @@ fn run_training_and_interactive(
     let string = String::from("User: How do mountains form?");
 
     // The untrained model's noise, for contrast.
-    println!("\n=== BEFORE TRAINING ===");
-    println!("Input: {}", string);
-    println!("Output: {}", llm.predict(&string));
+    println!("\nBefore training (untrained dials: pure noise)");
+    println!("  input      {string}");
+    println!("  output     {}", llm.predict(&string));
 
     // Pretraining phase.
-    println!("\n=== PRE-TRAINING MODEL ===");
+    println!("\nPre-training phase");
     println!(
-        "Pre-training on {} examples for {} epochs with learning rate {}",
+        "  {} statements x {} epochs at learning rate {}",
         dataset.pretraining_data.len(),
         PRETRAINING_EPOCHS,
         PRETRAINING_LR
@@ -544,9 +547,9 @@ fn run_training_and_interactive(
     train_pretraining(dataset, llm, true);
 
     // Instruction tuning phase.
-    println!("\n=== INSTRUCTION TUNING ===");
+    println!("\nInstruction tuning phase");
     println!(
-        "Instruction tuning on {} examples for {} epochs with learning rate {}",
+        "  {} chat examples x {} epochs at learning rate {}",
         dataset.chat_training_data.len(),
         TUNING_EPOCHS,
         TUNING_LR
@@ -557,11 +560,11 @@ fn run_training_and_interactive(
     save_checkpoint(llm, model_path);
 
     // The trained model's answer to the same prompt.
-    println!("\n=== AFTER TRAINING ===");
-    println!("Input: {}", string);
+    println!("\nAfter training");
     let result = llm.predict(&string);
-    println!("Output: {}", result);
-    println!("======================\n");
+    println!("  input      {string}");
+    println!("  output     {result}");
+    println!();
 
     // Chat loop until "exit".
     chat::chat_loop(llm, trace, knobs);

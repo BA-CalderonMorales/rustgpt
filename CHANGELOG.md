@@ -5,6 +5,39 @@ produced: score, trajectory, and artifacts. The top section becomes the
 GitHub release body (see `.github/workflows/release.yml`), so the public
 record and the repo history are the same document.
 
+## [0.0.11] - 2026-08-22
+
+The legibility pass: every human-facing surface that predates the help
+and demo redesigns now speaks the same visual grammar -- numbered steps,
+aligned columns, thousands-separated numbers, and values that read as
+words when they mean "off".
+
+`--models` rebuilt: dynamic-width columns (long ids like
+watercycle-latest no longer collapse into their neighbors), right-aligned
+PARAMS with separators, artifact filenames, quality verdicts verbatim.
+The machine JSON contract on stdout is untouched; the table stays on
+stderr. Interactive chat rebuilt: the boot block is an aligned Model
+section (network, dimensions, parameters, seed), loaded checkpoints and
+before/after-training phases read as titled sections instead of banner
+dumps, the prompt is `you>`, answers print as `model>`, and `/config`
+renders a knob table where neutral values say "off". The tiny-lane
+training narration (`--tiny --train`, stderr) joined the demo's numbered
+step grammar with DONE bars; its stdout JSON is untouched.
+
+New homes per the facade rules: application/catalog_table.rs renders the
+catalog table, application/format.rs owns number rendering (with a unit
+test), narrate.rs gained the stderr twins of the demo's step primitives;
+the stage-banner constants are gone. Contract pins moved in the same
+change (models header, config verdicts, answer marker, loaded-checkpoint
+regression pin). One behavior bug caught during the pass: the restyle
+initially dropped the train-lane save_checkpoint call -- restored before
+commit, covered by existing checkpoint round-trip tests.
+
+Seeded evidence unchanged by design: micro lane exact 4/4, prefix 4/4,
+mean 1.0 at seed 42; stories-full eval CE p10/p50/p90 5.49/5.87/6.31.
+Gates: fmt, clippy -D warnings, 104 tests passed (one new). GIF/PNG
+re-recorded so the showcase matches the shipped surfaces.
+
 ## [0.0.10] - 2026-08-22
 
 The demo, retold for humans: `--demo` is now a seven-step numbered

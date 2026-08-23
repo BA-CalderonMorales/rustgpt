@@ -5,31 +5,7 @@
 pub(crate) fn run_models() {
     let catalog = load_catalog();
     if let Some(arr) = catalog.as_array() {
-        // Human table on stderr: id, family, parameters, path, quality.
-        eprintln!("ID          Family      Parameters   Path                Quality");
-        eprintln!("---------------------------------------------------------------");
-        for entry in arr {
-            let id = entry["id"].as_str().unwrap_or("");
-            let family = entry["family"].as_str().unwrap_or("");
-            let params = entry["parameters"]
-                .as_u64()
-                .map_or_else(|| "-".to_string(), |v| v.to_string());
-            let path = entry["path"].as_str().unwrap_or("");
-            let path_display = path.rsplit('/').next().unwrap_or(path);
-            let quality = entry["quality"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_else(|| "-".to_string());
-            eprintln!(
-                "{:12} {:12} {:12} {:25} {}",
-                id, family, params, path_display, quality
-            );
-        }
+        super::print_catalog_table(arr);
     } else {
         eprintln!("error: catalog is not an array");
         std::process::exit(1);

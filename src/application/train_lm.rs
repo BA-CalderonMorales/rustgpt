@@ -1,6 +1,6 @@
 use llm::LLM;
 
-use super::{note, save_checkpoint, stage, tiny_eval, tiny_heldout_stories};
+use super::{done, note, save_checkpoint, step, tiny_eval, tiny_heldout_stories};
 use crate::cli::Invocation;
 
 const TRAINING_LR: f32 = 0.0005;
@@ -22,16 +22,13 @@ pub(crate) fn run_training_lm(
     }
     let epochs = invocation.epochs;
 
-    // STAGE 1 DATA: what the model will read, one example per line.
-    stage(1);
+    // STEP 1 CORPUS: what the model will read, one example per line.
+    step(1, "Training corpus");
     note(&format!(
-        "{} examples loaded from {path}; each line is one example the model reads during training.",
+        "{path} holds {} examples; each line is one example the model reads.",
         texts.len()
     ));
-    note(&format!(
-        "The first example: {:?}...",
-        first_words(&texts[0], 14)
-    ));
+    note(&format!("First one: \"{}...\"", first_words(&texts[0], 14)));
 
     // E11 lever: append " </s>" to every row so every story ends.
     if invocation.eos {
@@ -40,38 +37,41 @@ pub(crate) fn run_training_lm(
         }
         note("Every example now ends with </s>, the model's word for 'the end'.");
     }
+    done();
 
-    // STAGE 2 VOCABULARY and STAGE 3 MODEL: what the model can see and how
+    // STEP 2 VOCABULARY and STEP 3 MODEL: what the model can see and how
     // many dials it has.
-    stage(2);
+    step(2, "Vocabulary");
     note(&format!(
-        "The vocabulary holds {} whole words, plus <unk> for strangers and </s> for 'the end'. Words outside this list are invisible to the model.",
+        "{} whole words harvested, plus <unk> for strangers and </s> for 'the end'.",
         llm.vocab.words.len()
     ));
-    stage(3);
+    note("Words outside this list are invisible to the model.");
+    done();
+    step(3, "Model");
     note(&format!(
         "{} adjustable dials (parameters), arranged as: word lookup -> {} thinking blocks -> word guesser.",
         llm.total_parameters(),
         block_count(llm),
     ));
+    done();
 
-    // STAGE 4 TRAINING: epochs at learning rate, live loss bar; the W8
+    // STEP 4 TRAINING: epochs at learning rate, live loss bar; the W8
     // decay target rides the linear per-epoch schedule when given.
-    stage(4);
+    step(4, "Training (watch the bar fall)");
+    let epoch_noun = if epochs == 1 {
+        "1 epoch".to_string()
+    } else {
+        format!("{epochs} epochs")
+    };
     note(&format!(
-        "Training for {epochs} epochs (an epoch is one full read of every example) at learning rate {TRAINING_LR}{}.",
+        "{epoch_noun} at learning rate {TRAINING_LR}{}; an epoch is one full read of every example.",
         match invocation.lr_decay {
             Some(final_lr) => format!(" decaying to {final_lr}"),
             None => String::new(),
         }
     ));
-    note("Loss is the average surprise: lower means wrong less often. Watch the bar fall.");
-    eprintln!(
-        "=== LANGUAGE MODEL TRAINING === {} stories, {} epochs, lr {}",
-        texts.len(),
-        epochs,
-        TRAINING_LR
-    );
+    note("Loss is the average surprise: lower means wrong less often.");
 
     // Train, sampling the held-out logit-regime profile every epoch: the
     // continuous instrument that makes collapse onset visible. Then persist
@@ -88,8 +88,9 @@ pub(crate) fn run_training_lm(
         &profile_texts,
     );
     save_checkpoint(llm, model_path);
+    done();
     note(&format!(
-        "Loss went {:.2} -> {:.2}: the guesses moved closer to the real words. Past the lowest point, memorizing replaces learning -- so we stop at the budget and keep the curve as evidence.",
+        "Loss fell {:.2} -> {:.2}: the guesses moved closer to the real words. Past the lowest point, memorizing replaces learning -- so we stop at the budget and keep the curve as evidence.",
         losses.first().copied().unwrap_or(0.0),
         losses.last().copied().unwrap_or(0.0),
     ));
@@ -106,13 +107,14 @@ pub(crate) fn run_training_lm(
         })
         .collect();
 
-    // STAGE 5 EVALUATION: held-out stories the model never saw.
+    // STEP 5 EVALUATION: held-out stories the model never saw.
     let eval = tiny_eval(llm, 1.0, 0.0, 1.0, 0.0);
-    stage(5);
+    step(5, "Held-out score");
     narrate_eval(&eval);
+    done();
 
-    // STAGE 6 USE: how to talk to the trained artifact.
-    stage(6);
+    // STEP 6 USE: how to talk to the trained artifact.
+    step(6, "Use your model");
     note("Talk to your model with: llm --model <checkpoint path> --ask \"Once upon a time,\"");
     note("Or load it for a chat: llm --model <checkpoint path>");
 

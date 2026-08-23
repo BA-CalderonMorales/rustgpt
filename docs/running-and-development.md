@@ -36,8 +36,8 @@ pre-training and instruction tuning, prints a sample prediction, and then
 accepts prompts until `exit` is entered.
 
 ```text
-Enter prompt: How do mountains form?
-Model output: ...
+you> How do mountains form?
+model> ...
 ```
 
 With `--model <path>` and an existing checkpoint, the lane is the use
