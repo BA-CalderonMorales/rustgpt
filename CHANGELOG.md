@@ -5,6 +5,19 @@ produced: score, trajectory, and artifacts. The top section becomes the
 GitHub release body (see `.github/workflows/release.yml`), so the public
 record and the repo history are the same document.
 
+## [0.0.12] - 2026-08-22
+
+`--models` renders one record per audience: in a terminal, the human
+table alone -- no more raw JSON wall drowning it; piped, exactly one
+JSON object with a silent stderr (the machine contract, now clean on
+both channels). Same record, one rendering per reader; the terminal
+audience can still have the JSON by redirecting (`llm --models | cat`).
+
+The showcase GIF drove this: its terminal showed table plus JSON dump
+interleaved, which is what a real user sees. Contract pin moved in the
+same change (piped --models now asserts empty stderr); docs updated.
+Gates: fmt, clippy -D warnings, 104 tests passed. GIF re-recorded.
+
 ## [0.0.11] - 2026-08-22
 
 The legibility pass: every human-facing surface that predates the help

@@ -1,25 +1,34 @@
 /// The trained-model catalog: the durable record of what was made and how
-/// (path, family, parameters, seed, recipe, eval). `--models` serves it as
-/// one JSON object on stdout (the machine contract) with the human-readable
-/// table on stderr; the probe never loads data or builds a model.
+/// (path, family, parameters, seed, recipe, eval). `--models` renders one
+/// record per audience: a terminal gets the human table alone; a pipe gets
+/// exactly one JSON object on stdout (the machine contract). The probe
+/// never loads data or builds a model.
 pub(crate) fn run_models() {
+    // One catalog, one rendering per audience. A terminal that wanted JSON
+    // can redirect: llm --models | cat.
     let catalog = load_catalog();
-    if let Some(arr) = catalog.as_array() {
-        super::print_catalog_table(arr);
-    } else {
-        eprintln!("error: catalog is not an array");
-        std::process::exit(1);
-    }
+    let entries = match catalog.as_array() {
+        Some(entries) => entries,
+        None => {
+            eprintln!("error: catalog is not an array");
+            std::process::exit(1);
+        }
+    };
 
-    // Exactly one JSON object on stdout: the machine contract.
-    println!(
-        "{}",
-        serde_json::json!({
-            "status": "ok",
-            "seed": llm::seed(),
-            "catalog": catalog,
-        })
-    );
+    // The audience split: interactive humans read the table (stderr rides
+    // the same screen); machines parse the single JSON object.
+    if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        super::print_catalog_table(entries);
+    } else {
+        println!(
+            "{}",
+            serde_json::json!({
+                "status": "ok",
+                "seed": llm::seed(),
+                "catalog": catalog,
+            })
+        );
+    }
 }
 
 /// The catalog's raw JSON array; a missing or broken catalog is a hard

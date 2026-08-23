@@ -60,8 +60,9 @@ The original project demonstration is available in this
 cargo run --release -- --models
 ```
 
-`--models` prints exactly one JSON object: the trained-model catalog
-(`models/catalog.json`). Every entry is the durable record of one artifact:
+`--models` renders one record per audience: in a terminal you get the
+human table (id, family, parameters, artifact, quality); piped, it prints
+exactly one JSON object -- the trained-model catalog (`models/catalog.json`). Every entry is the durable record of one artifact:
 path, family, parameters, seed, recipe (data, epochs, LR), eval numbers,
 decode-quality numbers, and quality labels. The catalog is how you see what
 was made and how it was made -- the first stop before choosing a checkpoint.

@@ -283,12 +283,9 @@ fn models_emits_one_json_object_with_the_catalog() {
             .all(|entry| entry["path"].is_string() && entry["seed"].is_u64())
     );
 
-    // stderr carries the human-readable table.
-    assert!(
-        stderr(&output).contains("Trained models --"),
-        "the human table belongs on stderr"
-    );
-    assert!(stderr(&output).contains("PARAMS"), "column headers present");
+    // Machines get a silent stderr: the human table is the terminal
+    // view only.
+    assert_eq!(stderr(&output), "", "piped --models carries no human table");
 }
 
 #[test]
